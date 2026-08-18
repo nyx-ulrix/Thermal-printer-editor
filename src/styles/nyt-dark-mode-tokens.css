@@ -1,0 +1,148 @@
+/**
+ * NYT-Inspired Dark Mode Extension
+ * Import AFTER nyt-design-tokens.css.
+ *
+ * Uses the same semantic token names as light mode so components require
+ * no theme-specific selectors. The NYT News Apps team describes its dark
+ * mode approach as giving each color a light and dark definition through
+ * reusable color tokens.
+ */
+
+:root {
+  color-scheme: light;
+}
+
+/* Automatic dark mode, respecting the operating-system preference. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    /* Text / ink: off-white avoids the glare of pure white on dark surfaces. */
+    --ink-primary: #f5f5f5;
+    --ink-secondary: #d5d5d5;
+    --ink-tertiary: #adadad;
+    --ink-quaternary: #8e8e8e;
+    --ink-disabled: #6f6f6f;
+
+    /* Surfaces: elevation is expressed through progressively lighter tones. */
+    --surface-canvas: #121212;
+    --surface-tint: #1e1e1e;
+    --surface-elevated: #2a2a2a;
+    --surface-overlay: #333333;
+    --surface-inverse: #ffffff;
+
+    /* Strokes: use low-opacity white rather than opaque grey borders. */
+    --stroke-default: rgba(255, 255, 255, 0.18);
+    --stroke-strong: rgba(255, 255, 255, 0.30);
+    --stroke-subtle: rgba(255, 255, 255, 0.10);
+
+    /* Editorial accents: lighter, less visually harsh dark-surface variants. */
+    --accent-breaking: #ff6b7a;
+    --accent-developing: #ff9a5c;
+    --accent-editorial-blue: #8ab4e0;
+    --accent-interactive: #8ab4f8;
+    --accent-positive: #75c77e;
+    --accent-highlight: #514c1b;
+
+    --color-error: var(--accent-breaking);
+    --color-warning: var(--accent-developing);
+    --color-success: var(--accent-positive);
+    --color-info: var(--accent-interactive);
+
+    /* Minimal shadow plus surface elevation, appropriate to editorial UI. */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.30);
+    --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.40);
+    --shadow-lg: 0 8px 20px rgba(0, 0, 0, 0.50);
+  }
+}
+
+/* Explicit application override: <html data-theme="dark"> */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --ink-primary: #f5f5f5;
+  --ink-secondary: #d5d5d5;
+  --ink-tertiary: #adadad;
+  --ink-quaternary: #8e8e8e;
+  --ink-disabled: #6f6f6f;
+
+  --surface-canvas: #121212;
+  --surface-tint: #1e1e1e;
+  --surface-elevated: #2a2a2a;
+  --surface-overlay: #333333;
+  --surface-inverse: #ffffff;
+
+  --stroke-default: rgba(255, 255, 255, 0.18);
+  --stroke-strong: rgba(255, 255, 255, 0.30);
+  --stroke-subtle: rgba(255, 255, 255, 0.10);
+
+  --accent-breaking: #ff6b7a;
+  --accent-developing: #ff9a5c;
+  --accent-editorial-blue: #8ab4e0;
+  --accent-interactive: #8ab4f8;
+  --accent-positive: #75c77e;
+  --accent-highlight: #514c1b;
+
+  --color-error: var(--accent-breaking);
+  --color-warning: var(--accent-developing);
+  --color-success: var(--accent-positive);
+  --color-info: var(--accent-interactive);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.40);
+  --shadow-lg: 0 8px 20px rgba(0, 0, 0, 0.50);
+}
+
+/* Explicit light override, even when system preference is dark. */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+/* Reference component patterns */
+.nyt-page {
+  min-height: 100vh;
+  background-color: var(--surface-canvas);
+  color: var(--ink-secondary);
+}
+
+.nyt-surface {
+  background-color: var(--surface-tint);
+  border: 1px solid var(--stroke-subtle);
+}
+
+.nyt-elevated-surface {
+  background-color: var(--surface-elevated);
+  border: 1px solid var(--stroke-default);
+  box-shadow: var(--shadow-sm);
+}
+
+.nyt-divider {
+  border: 0;
+  border-top: 1px solid var(--stroke-default);
+}
+
+.nyt-link {
+  color: var(--accent-interactive);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.nyt-link:hover {
+  color: var(--accent-editorial-blue);
+}
+
+.nyt-breaking-label {
+  color: var(--accent-breaking);
+}
+
+.nyt-highlight {
+  background-color: var(--accent-highlight);
+  color: var(--ink-primary);
+}
+
+/*
+ * Theme-toggle example:
+ * document.documentElement.dataset.theme = 'dark';
+ * document.documentElement.dataset.theme = 'light';
+ * document.documentElement.removeAttribute('data-theme'); // follow OS preference
+ */

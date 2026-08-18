@@ -1,0 +1,330 @@
+/**
+ * New York Times Digital UI Design Tokens
+ * Based on NYT's editorial design system
+ * 
+ * Typography: NYT Cheltenham (headlines), NYT Imperial (body), NYT Franklin (UI/meta)
+ * Grid: 8px baseline with 4px increments
+ * Color: Charcoal/off-white palette with editorial accents
+ */
+
+:root {
+  /* ========================================
+   * TYPOGRAPHY - FONT FAMILIES
+   * ======================================== */
+  
+  --font-display: 'NYT Cheltenham', 'Cheltenham', 'Georgia', serif;
+  --font-body: 'NYT Imperial', 'Georgia', 'Times New Roman', serif;
+  --font-ui: 'NYT Franklin', 'Franklin Gothic', 'SF Pro', 'Roboto', sans-serif;
+  --font-logo: 'Engravers Old English BT', 'UnifrakturMaguntia', cursive;
+  
+  /* ========================================
+   * TYPOGRAPHY - FONT SIZES (Desktop)
+   * ======================================== */
+  
+  --text-display: 56px;      /* Page titles, hero features */
+  --text-h1: 36px;           /* Article headlines */
+  --text-h2: 22px;           /* Section headers */
+  --text-h3: 18px;           /* Subsections */
+  --text-body-lg: 18px;      /* Long-form body (comfortable reading) */
+  --text-body: 16px;         /* Standard body copy */
+  --text-caption: 14px;      /* Captions, metadata */
+  --text-meta: 12px;         /* Timestamps, tags, labels */
+  --text-ui-label: 10px;     /* UPPERCASE UI labels */
+  
+  /* ========================================
+   * TYPOGRAPHY - LINE HEIGHTS
+   * ======================================== */
+  
+  --leading-tight: 1.1;      /* Display headlines */
+  --leading-snug: 1.2;       /* H1 headlines */
+  --leading-normal: 1.3;     /* H2/H3, captions */
+  --leading-relaxed: 1.5;    /* Body copy minimum */
+  --leading-loose: 1.6;      /* Body copy comfortable */
+  
+  /* Line height in pixels for precise control */
+  --lh-display: 61.6px;      /* 56px × 1.1 */
+  --lh-h1: 43.2px;           /* 36px × 1.2 */
+  --lh-h2: 28.6px;           /* 22px × 1.3 */
+  --lh-h3: 23.4px;           /* 18px × 1.3 */
+  --lh-body: 28.8px;         /* 18px × 1.6 */
+  --lh-caption: 18.2px;      /* 14px × 1.3 */
+  
+  /* ========================================
+   * TYPOGRAPHY - LETTER SPACING
+   * ======================================== */
+  
+  --tracking-tight: -0.02em;     /* Display headlines */
+  --tracking-tighter: -0.01em;   /* H1 headlines */
+  --tracking-normal: 0;          /* Body, H2/H3 */
+  --tracking-loose: 0.01em;      /* Captions, metadata */
+  --tracking-ui-label: 1px;      /* UPPERCASE UI labels */
+  
+  /* ========================================
+   * TYPOGRAPHY - FONT WEIGHTS
+   * ======================================== */
+  
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  
+  /* ========================================
+   * SPACING - 8PX BASELINE GRID
+   * ======================================== */
+  
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 56px;
+  --space-11: 64px;
+  --space-12: 80px;
+  --space-13: 96px;
+  --space-14: 128px;
+  
+  /* Semantic spacing */
+  --space-paragraph: var(--space-4);        /* 16px paragraph margin-bottom */
+  --space-section: var(--space-10);         /* 56px section spacing */
+  --space-container: var(--space-5);        /* 20px right margin (newspaper-style) */
+  --space-margin-top: var(--space-6);       /* 25px ≈ 24px */
+  --space-margin-bottom: 12.5px;            /* Newspaper-style bottom margin */
+  
+  /* ========================================
+   * COLOR - INK (TEXT)
+   * ======================================== */
+  
+  --ink-primary: #121212;    /* Near-black for main headlines */
+  --ink-secondary: #363636;  /* Body text, long-form */
+  --ink-tertiary: #5a5a5a;   /* Subheadings, secondary text */
+  --ink-quaternary: #727272; /* Metadata, captions, timestamps */
+  --ink-disabled: #a8a8a8;   /* Disabled states */
+  
+  /* ========================================
+   * COLOR - SURFACE (BACKGROUNDS)
+   * ======================================== */
+  
+  --surface-canvas: #ffffff;     /* Primary background */
+  --surface-tint: #ebebeb;       /* Secondary backgrounds, card tints */
+  --surface-elevated: #f7f7f7;   /* Elevated surfaces */
+  --surface-inverse: #121212;    /* Inverse backgrounds (dark mode) */
+  
+  /* ========================================
+   * COLOR - STROKE (BORDERS/DIVIDERS)
+   * ======================================== */
+  
+  --stroke-default: #dfdfdf;     /* Default dividers, borders */
+  --stroke-strong: #b8b8b8;      /* Strong dividers */
+  --stroke-subtle: #f0f0f0;      /* Subtle dividers */
+  
+  /* ========================================
+   * COLOR - CHROMATIC (ACCENTS)
+   * ======================================== */
+  
+  /* Editorial/semantic colors */
+  --accent-breaking: #d0021b;    /* Breaking news red */
+  --accent-developing: #e6540a;  /* Developing story orange */
+  --accent-editorial-blue: #326891;  /* Section links */
+  --accent-interactive: #2671dc;     /* CTAs, interactive elements */
+  --accent-positive: #267c30;        /* Success states */
+  --accent-highlight: #fefad1;       /* Highlighter yellow */
+  
+  /* ========================================
+   * COLOR - FUNCTIONAL
+   * ======================================== */
+  
+  --color-error: #d0021b;
+  --color-warning: #e6540a;
+  --color-success: #267c30;
+  --color-info: #2671dc;
+  
+  /* ========================================
+   * LAYOUT - GRID & MEASURE
+   * ======================================== */
+  
+  --measure-min: 55ch;       /* Minimum characters per line */
+  --measure-max: 75ch;       /* Maximum characters per line */
+  --measure-optimal: 65ch;   /* Optimal reading comfort */
+  
+  --grid-columns-desktop: 5;
+  --grid-columns-tablet: 3;
+  --grid-columns-mobile: 1;
+  
+  --container-max: 1200px;   /* Max content width */
+  --container-narrow: 720px; /* Article body width */
+  
+  /* ========================================
+   * CORNER RADIUS
+   * ======================================== */
+  
+  --radius-sm: 2px;
+  --radius-md: 3px;          /* NYT dominant radius */
+  --radius-lg: 6px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+  
+  /* ========================================
+   * SHADOWS (Minimal - Editorial Style)
+   * ======================================== */
+  
+  --shadow-none: none;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.08);
+  
+  /* ========================================
+   * TRANSITIONS
+   * ======================================== */
+  
+  --transition-fast: 100ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 300ms ease;
+  
+  /* ========================================
+   * Z-INDEX SCALE
+   * ======================================== */
+  
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal: 300;
+  --z-tooltip: 400;
+  --z-toast: 500;
+}
+
+/* ========================================
+ * TYPOGRAPHIC STYLES - UTILITY CLASSES
+ * ======================================== */
+
+/* Display / Page Title */
+.text-display {
+  font-family: var(--font-display);
+  font-size: var(--text-display);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  font-weight: var(--weight-bold);
+  color: var(--ink-primary);
+}
+
+/* H1 - Article Headline */
+.text-h1 {
+  font-family: var(--font-display);
+  font-size: var(--text-h1);
+  line-height: var(--leading-snug);
+  letter-spacing: var(--tracking-tighter);
+  font-weight: var(--weight-bold);
+  color: var(--ink-primary);
+}
+
+/* H2 - Section Header */
+.text-h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-h2);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-normal);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-primary);
+}
+
+/* H3 - Subsection */
+.text-h3 {
+  font-family: var(--font-display);
+  font-size: var(--text-h3);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-normal);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-secondary);
+}
+
+/* Body - Long-form (Comfortable) */
+.text-body-lg {
+  font-family: var(--font-body);
+  font-size: var(--text-body-lg);
+  line-height: var(--leading-loose);
+  letter-spacing: var(--tracking-normal);
+  font-weight: var(--weight-regular);
+  color: var(--ink-secondary);
+}
+
+/* Body - Standard */
+.text-body {
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  line-height: var(--leading-relaxed);
+  letter-spacing: var(--tracking-normal);
+  font-weight: var(--weight-regular);
+  color: var(--ink-secondary);
+}
+
+/* Caption / Metadata */
+.text-caption {
+  font-family: var(--font-ui);
+  font-size: var(--text-caption);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-loose);
+  font-weight: var(--weight-regular);
+  color: var(--ink-quaternary);
+}
+
+/* Meta - Timestamps, Tags */
+.text-meta {
+  font-family: var(--font-ui);
+  font-size: var(--text-meta);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-loose);
+  font-weight: var(--weight-medium);
+  color: var(--ink-quaternary);
+}
+
+/* UI Label - UPPERCASE */
+.text-ui-label {
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-label);
+  line-height: 1.4;
+  letter-spacing: var(--tracking-ui-label);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  color: var(--ink-tertiary);
+}
+
+/* ========================================
+ * RESPONSIVE TYPOGRAPHY (Mobile)
+ * ======================================== */
+
+@media (max-width: 768px) {
+  :root {
+    --text-display: 40px;
+    --text-h1: 28px;
+    --text-h2: 20px;
+    --text-h3: 16px;
+    --text-body-lg: 16px;
+    --text-body: 15px;
+    --text-caption: 13px;
+    --text-meta: 11px;
+    
+    --lh-display: 48px;
+    --lh-h1: 33.6px;
+    --lh-h2: 26px;
+    --lh-h3: 20.8px;
+    --lh-body: 25.6px;
+    --lh-caption: 16.9px;
+  }
+}
+
+/* ========================================
+ * PRINT STYLES
+ * ======================================== */
+
+@media print {
+  :root {
+    --text-body: 12pt;
+    --text-h1: 18pt;
+    --text-h2: 14pt;
+    --ink-primary: #000000;
+    --ink-secondary: #1a1a1a;
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "name": "receipt-printer-editor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Receipt printer editor for designing labels and printing raw TSPL to a Gprinter GP-3120TL",
+  "main": "out/main/index.js",
+  "author": "Receipt Printer Editor",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "tsc --noEmit -p tsconfig.json && electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "icon": "node scripts/make-icon.mjs",
+    "package": "npm run build && electron-builder --win --dir --publish never",
+    "dist": "npm run build && electron-builder --win --publish never"
+  },
+  "build": {
+    "appId": "com.receiptprinter.editor",
+    "productName": "Receipt Printer Editor",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*",
+      "build/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "${productName} Setup ${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Receipt Printer Editor",
+      "uninstallDisplayName": "Receipt Printer Editor",
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "esbuild@0.21.5": true
+  }
+}
