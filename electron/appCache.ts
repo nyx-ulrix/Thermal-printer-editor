@@ -1,5 +1,5 @@
 import { app, ipcMain } from 'electron'
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { LabelTemplate } from '../src/lib/types'
 import {
@@ -11,16 +11,33 @@ import {
 const KEY_PATTERN = /^[a-zA-Z0-9._-]+$/
 const ID_PATTERN = /^[a-zA-Z0-9_-]+$/
 
-function cacheRoot(): string {
-  return join(app.getPath('userData'), 'app-cache')
+function dataRoot(): string {
+  return join(app.getPath('userData'), 'data')
 }
 
 function storeDir(): string {
-  return join(cacheRoot(), 'store')
+  return join(dataRoot(), 'store')
 }
 
 function templatesDir(): string {
-  return join(cacheRoot(), 'templates')
+  return join(dataRoot(), 'templates')
+}
+
+function migrateLegacyAppCache(): void {
+  const legacyRoot = join(app.getPath('userData'), 'app-cache')
+  if (!existsSync(legacyRoot)) return
+
+  mkdirSync(dataRoot(), { recursive: true })
+  for (const name of ['templates', 'store']) {
+    const from = join(legacyRoot, name)
+    const to = join(dataRoot(), name)
+    if (!existsSync(from) || existsSync(to)) continue
+    try {
+      cpSync(from, to, { recursive: true })
+    } catch {
+      // Reads fall back to the old folder if the copy cannot finish.
+    }
+  }
 }
 
 function ensureDir(path: string): void {
@@ -51,13 +68,17 @@ function writeJsonFile(filePath: string, value: unknown): void {
 
 export function readStore(key: string): unknown | null {
   if (!isSafeKey(key)) return null
-  return readJsonFile(join(storeDir(), `${key}.json`))
+  migrateLegacyAppCache()
+  const stored = readJsonFile(join(storeDir(), `${key}.json`))
+  if (stored != null) return stored
+  return readJsonFile(join(app.getPath('userData'), 'app-cache', 'store', `${key}.json`))
 }
 
 export function writeStore(key: string, value: unknown): void {
   if (!isSafeKey(key)) {
-    throw new Error('Invalid cache key')
+    throw new Error('Invalid store key')
   }
+  migrateLegacyAppCache()
   writeJsonFile(join(storeDir(), `${key}.json`), value)
 }
 
@@ -68,20 +89,25 @@ function readLegacyTemplateFile(filePath: string): LabelTemplate | null {
 }
 
 export function readTemplates(): LabelTemplate[] {
+  migrateLegacyAppCache()
   ensureDir(templatesDir())
   const templates: LabelTemplate[] = []
 
   for (const entry of readdirSync(templatesDir(), { withFileTypes: true })) {
     const fullPath = join(templatesDir(), entry.name)
-    if (entry.isDirectory()) {
-      const packed = readJsonFile(join(fullPath, 'template.json'))
-      if (!isTemplateRecord(packed)) continue
-      templates.push(unpackStoredTemplate(fullPath, packed))
-      continue
-    }
-    if (entry.isFile() && entry.name.endsWith('.json')) {
-      const template = readLegacyTemplateFile(fullPath)
-      if (template) templates.push(template)
+    try {
+      if (entry.isDirectory()) {
+        const packed = readJsonFile(join(fullPath, 'template.json'))
+        if (!isTemplateRecord(packed)) continue
+        templates.push(unpackStoredTemplate(fullPath, packed))
+        continue
+      }
+      if (entry.isFile() && entry.name.endsWith('.json')) {
+        const template = readLegacyTemplateFile(fullPath)
+        if (template) templates.push(template)
+      }
+    } catch (error) {
+      console.error(`Could not load template ${entry.name}`, error)
     }
   }
 
@@ -93,18 +119,22 @@ export function writeTemplates(templates: unknown): void {
     throw new Error('Templates must be an array')
   }
 
+  migrateLegacyAppCache()
   ensureDir(templatesDir())
   const keep = new Set<string>()
 
   for (const item of templates) {
     if (!isTemplateRecord(item) || !isSafeId(item.id)) continue
+    const updatedAt = Number(item.updatedAt) || Date.now()
     const template: LabelTemplate = {
       id: String(item.id),
       name: typeof item.name === 'string' ? item.name : 'Untitled label',
-      updatedAt: Number(item.updatedAt) || Date.now(),
+      createdAt: Number(item.createdAt) || updatedAt,
+      updatedAt,
       media: item.media as LabelTemplate['media'],
       elements: Array.isArray(item.elements) ? (item.elements as LabelTemplate['elements']) : [],
-      copies: Number(item.copies) || 1
+      copies: Number(item.copies) || 1,
+      groupId: typeof item.groupId === 'string' && item.groupId ? item.groupId : undefined
     }
     keep.add(template.id)
     packTemplateToDir(join(templatesDir(), template.id), template)
@@ -132,17 +162,26 @@ export function writeTemplates(templates: unknown): void {
 }
 
 export function registerCacheIpc(): void {
-  ensureDir(storeDir())
-  ensureDir(templatesDir())
+  try {
+    migrateLegacyAppCache()
+    ensureDir(storeDir())
+    ensureDir(templatesDir())
+  } catch (error) {
+    console.error('Could not prepare app data folder', error)
+  }
 
   ipcMain.on('cache:read', (event, key: unknown) => {
-    event.returnValue = isSafeKey(key) ? readStore(key) : null
+    try {
+      event.returnValue = isSafeKey(key) ? readStore(key) : null
+    } catch {
+      event.returnValue = null
+    }
   })
 
   ipcMain.handle('cache:write', (_event, key: unknown, value: unknown) => {
     try {
       if (!isSafeKey(key)) {
-        return { ok: false as const, error: 'Invalid cache key' }
+        return { ok: false as const, error: 'Invalid store key' }
       }
       writeStore(key, value)
       return { ok: true as const }
@@ -151,8 +190,13 @@ export function registerCacheIpc(): void {
     }
   })
 
-  ipcMain.on('cache:readTemplates', (event) => {
-    event.returnValue = readTemplates()
+  ipcMain.handle('cache:readTemplates', () => {
+    try {
+      return readTemplates()
+    } catch (error) {
+      console.error('Could not read templates', error)
+      return []
+    }
   })
 
   ipcMain.handle('cache:writeTemplates', (_event, templates: unknown) => {

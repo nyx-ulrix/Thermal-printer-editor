@@ -159,10 +159,19 @@ export interface FontLibraryItem {
 export interface LabelTemplate {
   id: string
   name: string
+  /** First save time. Older templates fall back to updatedAt. */
+  createdAt?: number
   updatedAt: number
   media: LabelMedia
   elements: LabelElement[]
   copies: number
+  /** Home-screen folder. Missing or empty means ungrouped. */
+  groupId?: string | null
+}
+
+export interface TemplateGroup {
+  id: string
+  name: string
 }
 
 export type FieldValue =
@@ -214,10 +223,10 @@ export interface PrinterBridge {
   printRaw(printerName: string, payload: Uint8Array): Promise<PrintResult>
 }
 
-/** File-backed application cache under userData/app-cache, used by the packaged app. */
+/** File-backed app data under userData/data, used by the packaged app. */
 export interface AppCacheBridge {
   read(key: string): unknown | null
   write(key: string, value: unknown): Promise<void>
-  readTemplates(): LabelTemplate[]
+  readTemplates(): Promise<LabelTemplate[]>
   writeTemplates(templates: LabelTemplate[]): Promise<void>
 }

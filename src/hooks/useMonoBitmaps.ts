@@ -11,7 +11,8 @@ export interface MonoBitmapsState {
   error: string | null
 }
 
-function sourceSignature(dataUrl: string): string {
+function sourceSignature(dataUrl: string | undefined): string {
+  if (!dataUrl) return 'empty'
   return `${dataUrl.length}:${dataUrl.slice(-24)}`
 }
 
@@ -33,14 +34,14 @@ function signatureOfInput(element: InputElement): string {
   const box = inputBoxSize(element)
   return [
     element.id,
-    sourceSignature(element.imageStyle.sourceDataUrl),
+    sourceSignature(element.imageStyle?.sourceDataUrl),
     box.widthMm,
     box.heightMm,
     element.rotation,
-    element.imageStyle.threshold,
-    element.imageStyle.dither ? 'd' : '-',
-    element.imageStyle.invert ? 'i' : '-',
-    element.imageStyle.sourceDataUrl ? 'img' : 'empty',
+    element.imageStyle?.threshold,
+    element.imageStyle?.dither ? 'd' : '-',
+    element.imageStyle?.invert ? 'i' : '-',
+    element.imageStyle?.sourceDataUrl ? 'img' : 'empty',
     getDpi()
   ].join('|')
 }

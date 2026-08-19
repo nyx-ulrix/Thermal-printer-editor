@@ -7,10 +7,19 @@ import './styles/nyt-design-tokens.css'
 import './styles/nyt-dark-mode-tokens.css'
 import './styles.css'
 
-applyStoredTheme()
+try {
+  applyStoredTheme()
+} catch {
+  // Theme must never block the first paint.
+}
 
 const container = document.getElementById('root')
 if (!container) throw new Error('Root element not found')
+
+window.addEventListener('error', (event) => {
+  if (container.childElementCount > 0) return
+  container.textContent = event.message || 'The editor failed to start.'
+})
 
 createRoot(container).render(
   <StrictMode>

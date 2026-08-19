@@ -56,6 +56,9 @@ export type IconName =
   | 'x'
   | 'grip'
   | 'chevron'
+  | 'folder'
+  | 'sortAsc'
+  | 'sortDesc'
 
 const ICONS: Record<IconName, ReactNode> = {
   home: (
@@ -380,7 +383,26 @@ const ICONS: Record<IconName, ReactNode> = {
       <circle cx="15" cy="17" r="1.15" fill="currentColor" stroke="none" />
     </>
   ),
-  chevron: <path d="m9 6 6 6-6 6" />
+  chevron: <path d="m9 6 6 6-6 6" />,
+  folder: (
+    <>
+      <path d="M3 8.5V19a1.5 1.5 0 0 0 1.5 1.5h15A1.5 1.5 0 0 0 21 19V10a1.5 1.5 0 0 0-1.5-1.5H11L9 6H4.5A1.5 1.5 0 0 0 3 7.5z" />
+    </>
+  ),
+  sortAsc: (
+    <>
+      <path d="M8 17V7" />
+      <path d="m5 10 3-3 3 3" />
+      <path d="M13 7h7M13 12h5M13 17h3" />
+    </>
+  ),
+  sortDesc: (
+    <>
+      <path d="M8 7v10" />
+      <path d="m5 14 3 3 3-3" />
+      <path d="M13 7h7M13 12h5M13 17h3" />
+    </>
+  )
 }
 
 interface IconProps {

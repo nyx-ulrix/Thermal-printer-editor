@@ -1830,6 +1830,178 @@ input[type='range'] {
   padding-bottom: 96px;
 }
 
+.home-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.home-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.home-title-row h1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-back {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--stroke-subtle);
+  border-radius: 999px;
+  background: var(--surface-tint);
+  color: var(--ink-primary);
+  cursor: pointer;
+}
+
+.home-back .ui-icon {
+  transform: rotate(180deg);
+}
+
+.home-back.is-drop,
+.home-folder.is-drop,
+.home-library-section.is-drop {
+  outline: 2px solid var(--accent-interactive);
+  outline-offset: 2px;
+}
+
+.home-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.home-sort {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.home-sort-field {
+  white-space: nowrap;
+}
+
+.home-library-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-1);
+  border-radius: 16px;
+}
+
+.home-library-section > h2 {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-secondary);
+}
+
+.home-folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: var(--space-4);
+}
+
+.home-folder {
+  position: relative;
+}
+
+.home-folder-open {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.home-folder-tab {
+  display: block;
+  width: 42%;
+  height: 12px;
+  margin-left: 14px;
+  border: 1px solid var(--stroke-subtle);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: var(--surface-elevated);
+}
+
+.home-folder-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 108px;
+  padding: var(--space-4);
+  border: 1px solid var(--stroke-subtle);
+  border-radius: 0 14px 14px 14px;
+  background: var(--surface-elevated);
+  color: var(--ink-primary);
+}
+
+.home-folder-name {
+  font-family: var(--font-display);
+  font-size: var(--text-h3);
+  font-weight: var(--weight-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.home-folder-count {
+  font-family: var(--font-ui);
+  font-size: var(--text-meta);
+  color: var(--ink-quaternary);
+}
+
+.home-folder-menu {
+  position: absolute;
+  top: 18px;
+  right: var(--space-2);
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.home-folder:hover .home-folder-menu,
+.home-folder-menu:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.print-template-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.print-template-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
 .page.settings-page {
   display: flex;
   flex-direction: column;
@@ -1867,6 +2039,8 @@ input[type='range'] {
   border: 1px solid var(--stroke-subtle);
   border-radius: 16px;
   background: var(--surface-tint);
+  user-select: none;
+  cursor: grab;
 }
 
 .home-template-open {
@@ -1977,6 +2151,26 @@ input[type='range'] {
 
 .home-card-menu-list button.is-danger {
   color: var(--color-error);
+}
+
+.home-card-menu-list.is-move {
+  flex-direction: column;
+  min-width: 160px;
+}
+
+.home-card-menu-list.is-move button {
+  width: 100%;
+  height: auto;
+  justify-content: flex-start;
+  padding: 8px 10px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  text-align: left;
+}
+
+.home-card-menu-list.is-move button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .home-fab {

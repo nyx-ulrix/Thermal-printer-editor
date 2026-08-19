@@ -1,7 +1,7 @@
 import { normalizeFieldValues, normalizeLabelElement } from './fields'
 import { withMediaDefaults } from './media'
 import { ensurePersistence, readPersisted, writePersisted } from './persist'
-import type { FieldValues, FontLibraryItem, LabelMedia, LabelTemplate, SavedPrintFill } from './types'
+import type { FieldValues, FontLibraryItem, LabelMedia, LabelTemplate, SavedPrintFill, TemplateGroup } from './types'
 
 const SESSION_KEY = 'gp3120tl.session.v1'
 const TEMPLATES_KEY = 'gp3120tl.templates.v1'
@@ -9,6 +9,7 @@ const VALUES_KEY = 'gp3120tl.fieldvalues.v1'
 const HISTORY_KEY = 'gp3120tl.printfills.v1'
 const PANELS_KEY = 'gp3120tl.panels.v1'
 const FONTS_KEY = 'gp3120tl.fonts.v1'
+const GROUPS_KEY = 'gp3120tl.templateGroups.v1'
 
 export interface PersistedSession {
   media: LabelMedia
@@ -37,27 +38,43 @@ export function saveSession(session: PersistedSession): void {
 function normalizeTemplates(stored: LabelTemplate[]): LabelTemplate[] {
   return stored
     .filter((template) => Boolean(template?.id))
-    .map((template) => ({
-      ...template,
-      media: withMediaDefaults(template.media),
-      elements: Array.isArray(template.elements)
-        ? template.elements.map(normalizeLabelElement)
-        : []
-    }))
+    .map((template) => {
+      const updatedAt = Number(template.updatedAt) || Date.now()
+      const createdAt = Number(template.createdAt) || updatedAt
+      return {
+        ...template,
+        createdAt,
+        updatedAt,
+        media: withMediaDefaults(template.media),
+        elements: Array.isArray(template.elements)
+          ? template.elements.map(normalizeLabelElement)
+          : [],
+        groupId: typeof template.groupId === 'string' && template.groupId ? template.groupId : undefined
+      }
+    })
 }
 
 export function loadTemplates(): LabelTemplate[] {
   ensurePersistence()
-  const cached = window.appCache?.readTemplates() ?? []
-  if (cached.length > 0) {
-    return normalizeTemplates(cached)
-  }
   const stored = readJson<LabelTemplate[]>(TEMPLATES_KEY, [])
-  const templates = Array.isArray(stored) ? normalizeTemplates(stored) : []
-  if (templates.length > 0) {
-    window.appCache?.writeTemplates(templates)
+  return Array.isArray(stored) ? normalizeTemplates(stored) : []
+}
+
+export async function loadTemplatesAsync(): Promise<LabelTemplate[]> {
+  ensurePersistence()
+  if (window.appCache) {
+    try {
+      const cached = await window.appCache.readTemplates()
+      if (Array.isArray(cached) && cached.length > 0) return normalizeTemplates(cached)
+    } catch {
+      // Fall through to localStorage.
+    }
   }
-  return templates
+  const stored = loadTemplates()
+  if (stored.length > 0) {
+    void window.appCache?.writeTemplates(stored)
+  }
+  return stored
 }
 
 export function saveTemplates(templates: LabelTemplate[]): void {
@@ -66,6 +83,39 @@ export function saveTemplates(templates: LabelTemplate[]): void {
     return
   }
   writeJson(TEMPLATES_KEY, templates)
+}
+
+export function loadTemplateGroups(): TemplateGroup[] {
+  const stored = readJson<TemplateGroup[]>(GROUPS_KEY, [])
+  return Array.isArray(stored)
+    ? stored.filter((group) => Boolean(group?.id && group?.name))
+    : []
+}
+
+export function saveTemplateGroups(groups: TemplateGroup[]): void {
+  writeJson(GROUPS_KEY, groups)
+}
+
+const HOME_SORT_KEY = 'gp3120tl.homeSort.v1'
+
+export type HomeSortKey = 'created' | 'edited' | 'name'
+export type HomeSortDirection = 'asc' | 'desc'
+
+export interface HomeSortPreference {
+  key: HomeSortKey
+  direction: HomeSortDirection
+}
+
+export function loadHomeSort(): HomeSortPreference {
+  const stored = readJson<Partial<HomeSortPreference>>(HOME_SORT_KEY, {})
+  const key: HomeSortKey =
+    stored.key === 'created' || stored.key === 'name' || stored.key === 'edited' ? stored.key : 'edited'
+  const direction: HomeSortDirection = stored.direction === 'asc' ? 'asc' : 'desc'
+  return { key, direction }
+}
+
+export function saveHomeSort(sort: HomeSortPreference): void {
+  writeJson(HOME_SORT_KEY, sort)
 }
 
 /** Last values typed on the print page, per template, so a rerun starts prefilled. */

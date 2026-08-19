@@ -6,9 +6,9 @@ export function isGroup(element: LabelElement): element is GroupElement {
   return element.type === 'group'
 }
 
-export function walkElements(elements: LabelElement[]): LabelElement[] {
+export function walkElements(elements: LabelElement[] | undefined): LabelElement[] {
   const out: LabelElement[] = []
-  for (const element of elements) {
+  for (const element of elements ?? []) {
     out.push(element)
     if (element.type === 'group') out.push(...walkElements(element.children))
   }

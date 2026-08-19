@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { PrinterInfo, PrintResult } from '../src/lib/types'
 import { registerCacheIpc } from './appCache'
@@ -7,12 +8,31 @@ import { sendRawToPrinter } from './rawPrint'
 const APP_FOLDER = 'receipt-printer-editor'
 const APP_USER_MODEL_ID = 'com.receiptprinter.editor'
 
-// Keep templates and settings on a stable path in both `npm run dev` and the
-// packaged app. Electron otherwise uses "Electron" as the userData folder in dev.
-app.setName('Receipt Printer Editor')
-app.setPath('userData', join(app.getPath('appData'), APP_FOLDER))
+if (process.platform === 'win32') {
+  // GPU shader cache failures on Windows leave a composited black window.
+  app.disableHardwareAcceleration()
+  app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
+}
+
+const userData = join(app.getPath('appData'), APP_FOLDER)
+app.setPath('userData', userData)
+app.setPath('sessionData', userData)
+
+const chromiumCache = join(
+  process.platform === 'win32' ? join(app.getPath('home'), 'AppData', 'Local', APP_FOLDER) : userData,
+  app.isPackaged ? 'release-cache' : 'dev-cache'
+)
+mkdirSync(chromiumCache, { recursive: true })
+app.setPath('cache', chromiumCache)
+app.commandLine.appendSwitch('disk-cache-dir', chromiumCache)
+
 if (process.platform === 'win32') {
   app.setAppUserModelId(APP_USER_MODEL_ID)
+}
+
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
 }
 
 let mainWindow: BrowserWindow | null = null
@@ -23,9 +43,8 @@ function createWindow(): void {
     height: 880,
     minWidth: 1040,
     minHeight: 660,
-    show: false,
-    // Matches --surface-canvas so the first paint does not flash the wrong theme.
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#121212' : '#ffffff',
+    show: true,
+    backgroundColor: '#ffffff',
     autoHideMenuBar: true,
     title: 'Receipt Printer Editor',
     icon: join(app.getAppPath(), 'build/icon.png'),
@@ -33,15 +52,18 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: false
     }
   })
-
-  mainWindow.once('ready-to-show', () => mainWindow?.show())
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('did-fail-load', (_event, code, description, url) => {
+    console.error(`Renderer failed to load (${code}): ${description} ${url}`)
   })
 
   const devServerUrl = process.env['ELECTRON_RENDERER_URL']
@@ -92,14 +114,23 @@ function registerIpc(): void {
   )
 }
 
-app.whenReady().then(() => {
-  registerIpc()
-  createWindow()
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+if (gotLock) {
+  app.on('second-instance', () => {
+    if (!mainWindow) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
   })
-})
+
+  app.whenReady().then(() => {
+    registerIpc()
+    createWindow()
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+  })
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

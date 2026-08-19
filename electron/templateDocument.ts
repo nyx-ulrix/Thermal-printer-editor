@@ -121,7 +121,7 @@ function inlineAssets(templateDir: string, elements: unknown): unknown[] {
     if (element.type === 'image') {
       const fromFile = dataUrlFromAsset(templateDir, element.sourceFile)
       if (typeof element.sourceDataUrl !== 'string' || element.sourceDataUrl === '') {
-        if (fromFile) element.sourceDataUrl = fromFile
+        element.sourceDataUrl = fromFile || ''
       }
       delete element.sourceFile
       return
@@ -171,7 +171,9 @@ export function unpackStoredTemplate(templateDir: string, stored: JsonRecord): L
     updatedAt: Number(stored.updatedAt) || 0,
     media: stored.media as LabelTemplate['media'],
     elements: elements as LabelTemplate['elements'],
-    copies: Number(stored.copies) || 1
+    copies: Number(stored.copies) || 1,
+    createdAt: Number(stored.createdAt) || Number(stored.updatedAt) || Date.now(),
+    groupId: typeof stored.groupId === 'string' && stored.groupId ? stored.groupId : undefined
   }
 }
 
@@ -221,6 +223,8 @@ export function packTemplateToDir(templateDir: string, template: LabelTemplate):
     updatedAt: template.updatedAt,
     media: template.media,
     copies: template.copies,
+    createdAt: template.createdAt || template.updatedAt,
+    groupId: template.groupId || undefined,
     elements
   }
 

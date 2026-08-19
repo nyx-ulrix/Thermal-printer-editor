@@ -31,8 +31,9 @@ A Windows desktop app for designing thermal labels and printing them on a Gprint
 ### Templates
 - Save the full design — media, every element, and every input field
 - Open a template later and keep editing it
-- Home screen with a preview of each saved template
-- Duplicate or delete from the template list
+- Group templates on Home; click a group name to hide its cards
+- Duplicate, move, or delete from the Home preview cards
+- Design only shows the current template’s name and save, not the full library
 
 ### Print
 - Fill in text or image inputs without changing the design
@@ -52,7 +53,7 @@ A Windows desktop app for designing thermal labels and printing them on a Gprint
 
 Windows 10 or 11. Install the Gprinter GP-3120TL driver so the printer appears in Windows, then run the setup exe from [Releases](https://github.com/MalcolmLiew/thermal-printer-editor/releases).
 
-Templates stay on this computer as editable designs in the application cache. Opening one restores the layout so you can keep changing it.
+Templates stay on this computer as editable design files in the app data folder. Opening one restores the layout so you can keep changing it.
 
 ## Develop
 

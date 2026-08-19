@@ -43,12 +43,15 @@ import {
   loadPrintHistory,
   loadSession,
   loadTemplates,
+  loadTemplatesAsync,
+  loadTemplateGroups,
   rememberPrintFill,
   saveFieldValues,
   saveFontLibrary,
   savePrintHistory,
   saveSession,
-  saveTemplates
+  saveTemplates,
+  saveTemplateGroups
 } from './lib/storage'
 import { cloneElement, findElement, groupSelected, groupingSiblingIds, isImageLike, layerById, assignPrintOrder, moveElementAmongSiblings, moveRootOf, patchElement, removeById } from './lib/tree'
 import { collectStyledText, defaultTextStyle, isStyledText, textStyleOf, textStylePatch } from './lib/fontSize'
@@ -67,6 +70,7 @@ import type {
   LineElement,
   PrinterInfo,
   SavedPrintFill,
+  TemplateGroup,
   TextElement,
   TextStyle,
   TextAlign,
@@ -168,7 +172,10 @@ export default function App() {
   })
   const [values, setValues] = useState<FieldValues>(() => loadFieldValues()['current'] ?? {})
   const [printHistory, setPrintHistory] = useState<Record<string, SavedPrintFill[]>>(loadPrintHistory)
-  const [templates, setTemplates] = useState<LabelTemplate[]>(loadTemplates)
+  const [templates, setTemplates] = useState<LabelTemplate[]>(() =>
+    typeof window.appCache === 'undefined' ? loadTemplates() : []
+  )
+  const [templateGroups, setTemplateGroups] = useState<TemplateGroup[]>(loadTemplateGroups)
   const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null)
   const [templateName, setTemplateName] = useState('Untitled label')
   const [dirty, setDirty] = useState(false)
@@ -296,6 +303,21 @@ export default function App() {
   useEffect(() => {
     if (conversionError) setStatus({ kind: 'error', message: conversionError })
   }, [conversionError])
+
+  useEffect(() => {
+    if (typeof window.appCache === 'undefined') return
+    let cancelled = false
+    void loadTemplatesAsync()
+      .then((list) => {
+        if (!cancelled) setTemplates(list)
+      })
+      .catch(() => {
+        if (!cancelled) setTemplates([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const refreshPrinters = useCallback(async () => {
     const bridge = window.printer
@@ -849,13 +871,17 @@ export default function App() {
       const id = asCopy || !activeTemplateId ? newId() : activeTemplateId
       const name = asCopy ? `${trimmed} copy` : trimmed
 
+      const current = templates.find((item) => item.id === (asCopy ? activeTemplateId : id))
+      const now = Date.now()
       const template: LabelTemplate = {
         id,
         name,
-        updatedAt: Date.now(),
+        createdAt: asCopy || !current?.createdAt ? now : current.createdAt,
+        updatedAt: now,
         media,
         elements,
-        copies
+        copies,
+        groupId: current?.groupId
       }
       const next = [...templates.filter((item) => item.id !== id), template]
 
@@ -939,11 +965,13 @@ export default function App() {
     (id: string) => {
       const source = templates.find((item) => item.id === id)
       if (!source) return
+      const now = Date.now()
       const copy: LabelTemplate = {
         ...source,
         id: newId(),
         name: `${source.name} copy`,
-        updatedAt: Date.now()
+        createdAt: now,
+        updatedAt: now
       }
       const next = [copy, ...templates]
       setTemplates(next)
@@ -952,6 +980,49 @@ export default function App() {
     },
     [templates]
   )
+
+  const createTemplateGroup = useCallback((name: string) => {
+    const group: TemplateGroup = { id: newId(), name }
+    setTemplateGroups((current) => {
+      const next = [...current, group]
+      saveTemplateGroups(next)
+      return next
+    })
+    return group.id
+  }, [])
+
+  const renameTemplateGroup = useCallback((id: string, name: string) => {
+    setTemplateGroups((current) => {
+      const next = current.map((group) => (group.id === id ? { ...group, name } : group))
+      saveTemplateGroups(next)
+      return next
+    })
+  }, [])
+
+  const deleteTemplateGroup = useCallback((id: string) => {
+    setTemplateGroups((current) => {
+      const next = current.filter((group) => group.id !== id)
+      saveTemplateGroups(next)
+      return next
+    })
+    setTemplates((current) => {
+      const next = current.map((template) =>
+        template.groupId === id ? { ...template, groupId: undefined } : template
+      )
+      saveTemplates(next)
+      return next
+    })
+  }, [])
+
+  const setTemplateGroup = useCallback((templateId: string, groupId: string | null) => {
+    setTemplates((current) => {
+      const next = current.map((template) =>
+        template.id === templateId ? { ...template, groupId: groupId || undefined } : template
+      )
+      saveTemplates(next)
+      return next
+    })
+  }, [])
 
   const newLabel = useCallback(() => {
     skipDirty.current = true
@@ -994,11 +1065,16 @@ export default function App() {
         <main className="page-area">
           <HomeView
             templates={templates}
+            groups={templateGroups}
             onCreateNew={newLabel}
             onOpenTemplate={loadTemplate}
             onPrintTemplate={(id) => loadTemplate(id, 'print')}
             onDuplicateTemplate={duplicateTemplate}
             onDeleteTemplate={deleteTemplate}
+            onCreateGroup={createTemplateGroup}
+            onRenameGroup={renameTemplateGroup}
+            onDeleteGroup={deleteTemplateGroup}
+            onSetTemplateGroup={setTemplateGroup}
           />
         </main>
       )}
@@ -1098,16 +1174,12 @@ export default function App() {
               }}
             />
             <TemplatesPanel
-              templates={templates}
               activeId={activeTemplateId}
               name={templateName}
               dirty={dirty}
               onNameChange={setTemplateName}
               onSave={requestSave}
               onSaveCopy={() => saveTemplate(true)}
-              onLoad={loadTemplate}
-              onDelete={deleteTemplate}
-              onNew={newLabel}
             />
             <FontsPanel
               fonts={fontLibrary}
@@ -1126,6 +1198,7 @@ export default function App() {
         <main className="page-area">
           <PrintView
             templates={templates}
+            groups={templateGroups}
             activeTemplateId={activeTemplateId}
             templateName={templateName}
             values={values}

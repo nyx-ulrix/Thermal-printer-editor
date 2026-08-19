@@ -1,6 +1,6 @@
 {
   "name": "receipt-printer-editor",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "private": true,
   "description": "Receipt printer editor for designing labels and printing raw TSPL to a Gprinter GP-3120TL",
   "main": "out/main/index.js",

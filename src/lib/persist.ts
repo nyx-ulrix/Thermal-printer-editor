@@ -1,7 +1,7 @@
 /**
- * Renderer-side persistence. In Electron, values live in the application cache
- * under userData/app-cache so packaged builds keep templates (including images)
- * without hitting localStorage's quota. Browser-only previews still use localStorage.
+ * Renderer-side persistence. In Electron, values live as JSON files under
+ * userData/data so packaged builds keep templates without using Chromium's
+ * cache directory. Browser-only previews still use localStorage.
  */
 
 import type { LabelTemplate } from './types'
@@ -60,21 +60,25 @@ function migrateLegacyIfNeeded(): void {
     return
   }
   migrated = true
-  if (bridge.read(MIGRATED_KEY) === true) return
+  try {
+    if (bridge.read(MIGRATED_KEY) === true) return
 
-  for (const key of LEGACY_KEYS) {
-    const legacy = readLocal(key)
-    if (legacy == null) continue
-    if (key === TEMPLATES_KEY) {
-      if (Array.isArray(legacy) && bridge.readTemplates().length === 0) {
-        void bridge.writeTemplates(legacy as LabelTemplate[])
+    for (const key of LEGACY_KEYS) {
+      const legacy = readLocal(key)
+      if (legacy == null) continue
+      if (key === TEMPLATES_KEY) {
+        if (Array.isArray(legacy) && legacy.length > 0) {
+          void bridge.writeTemplates(legacy as LabelTemplate[])
+        }
+        continue
       }
-      continue
+      if (bridge.read(key) != null) continue
+      void bridge.write(key, legacy)
     }
-    if (bridge.read(key) != null) continue
-    void bridge.write(key, legacy)
+    void bridge.write(MIGRATED_KEY, true)
+  } catch {
+    // Persistence must never block the first paint.
   }
-  void bridge.write(MIGRATED_KEY, true)
 }
 
 function isPlain(value: unknown): value is object {

@@ -14,7 +14,8 @@ import type {
   LabelElement,
   LabelMedia,
   LabelTemplate,
-  SavedPrintFill
+  SavedPrintFill,
+  TemplateGroup
 } from '../lib/types'
 import { clamp } from '../lib/units'
 import Icon, { IconButton } from './Icon'
@@ -23,6 +24,7 @@ import NumberField from './NumberField'
 
 interface PrintViewProps {
   templates: LabelTemplate[]
+  groups: TemplateGroup[]
   activeTemplateId: string | null
   templateName: string
   values: FieldValues
@@ -52,6 +54,7 @@ function whenSaved(updatedAt: number): string {
 
 export default function PrintView({
   templates,
+  groups,
   activeTemplateId,
   templateName,
   values,
@@ -118,18 +121,63 @@ export default function PrintView({
         {sorted.length > 0 && (
           <section className="panel">
             <h2>Template</h2>
-            <div className="preset-buttons">
-              {sorted.map((template) => (
-                <button
-                  key={template.id}
-                  type="button"
-                  className={`chip${template.id === activeTemplateId ? ' is-active' : ''}`}
-                  onClick={() => onLoadTemplate(template.id)}
-                >
-                  {template.name}
-                </button>
-              ))}
-            </div>
+            {groups.length > 0 ? (
+              <div className="print-template-groups">
+                {groups.map((group) => {
+                  const items = sorted.filter((template) => template.groupId === group.id)
+                  if (items.length === 0) return null
+                  return (
+                    <div key={group.id} className="print-template-group">
+                      <span className="presets-label">{group.name}</span>
+                      <div className="preset-buttons">
+                        {items.map((template) => (
+                          <button
+                            key={template.id}
+                            type="button"
+                            className={`chip${template.id === activeTemplateId ? ' is-active' : ''}`}
+                            onClick={() => onLoadTemplate(template.id)}
+                          >
+                            {template.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+                {sorted.some((template) => !template.groupId) && (
+                  <div className="print-template-group">
+                    <span className="presets-label">Ungrouped</span>
+                    <div className="preset-buttons">
+                      {sorted
+                        .filter((template) => !template.groupId)
+                        .map((template) => (
+                          <button
+                            key={template.id}
+                            type="button"
+                            className={`chip${template.id === activeTemplateId ? ' is-active' : ''}`}
+                            onClick={() => onLoadTemplate(template.id)}
+                          >
+                            {template.name}
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="preset-buttons">
+                {sorted.map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    className={`chip${template.id === activeTemplateId ? ' is-active' : ''}`}
+                    onClick={() => onLoadTemplate(template.id)}
+                  >
+                    {template.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
         )}
 

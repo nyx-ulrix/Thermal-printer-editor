@@ -57,7 +57,7 @@ export interface ExtentDots {
 export function textExtentDots(element: TextElement): ExtentDots {
   const spec = getFontSpec(element.font, element.customFontFamily)
   const typography = textTypography(element)
-  const characters = Math.max(element.text.length, 1)
+  const characters = Math.max((element.text ?? '').length, 1)
 
   if (spec.kind === 'bitmap') {
     return {

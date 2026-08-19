@@ -6,7 +6,7 @@ declare global {
   interface Window {
     /** Exposed by electron/preload.ts. Undefined when the UI runs outside Electron. */
     printer?: PrinterBridge
-    /** File-backed cache in the Electron userData directory. */
+    /** File-backed app data in the Electron userData directory. */
     appCache?: AppCacheBridge
   }
 }

@@ -111,11 +111,18 @@ export function normalizeLabelElement(element: LabelElement): LabelElement {
   if (element.type === 'group') {
     return layoutGroup({
       ...normalizeGroup(element),
-      children: element.children.map(normalizeLabelElement)
+      children: (element.children ?? []).map(normalizeLabelElement)
     })
   }
   if (element.type === 'text') {
     return { ...element, ...migrateTextStyle(element), rotation: element.rotation ?? 0 }
+  }
+  if (element.type === 'image') {
+    return {
+      ...element,
+      rotation: element.rotation ?? 0,
+      sourceDataUrl: element.sourceDataUrl || ''
+    }
   }
   if (element.type !== 'input') return { ...element, rotation: element.rotation ?? 0 }
   const stored = element as InputElement & { widthMm?: number; heightMm?: number }
@@ -125,13 +132,17 @@ export function normalizeLabelElement(element: LabelElement): LabelElement {
     widthMm: Number.isFinite(stored.widthMm)
       ? Number(stored.widthMm)
       : stored.contentType === 'image'
-        ? stored.imageStyle.widthMm || 16
+        ? stored.imageStyle?.widthMm || 16
         : 24,
     heightMm: Number.isFinite(stored.heightMm)
       ? Number(stored.heightMm)
       : stored.contentType === 'image'
-        ? stored.imageStyle.heightMm || 16
+        ? stored.imageStyle?.heightMm || 16
         : 8,
+    imageStyle: {
+      ...stored.imageStyle,
+      sourceDataUrl: stored.imageStyle?.sourceDataUrl || ''
+    },
     textStyle: migrateTextStyle(stored.textStyle),
     textAlign: inputTextAlign(stored),
     verticalAlign: inputVerticalAlign(stored),
@@ -141,8 +152,8 @@ export function normalizeLabelElement(element: LabelElement): LabelElement {
 
 export function inputBoxSize(input: InputElement): { widthMm: number; heightMm: number } {
   return {
-    widthMm: Math.max(input.widthMm || input.imageStyle.widthMm || 24, 2),
-    heightMm: Math.max(input.heightMm || input.imageStyle.heightMm || 8, 2)
+    widthMm: Math.max(input.widthMm || input.imageStyle?.widthMm || 24, 2),
+    heightMm: Math.max(input.heightMm || input.imageStyle?.heightMm || 8, 2)
   }
 }
 
