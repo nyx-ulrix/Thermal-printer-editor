@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type RefObject } from 'react'
 import {
   inputsOf,
   isInputFilled,
@@ -17,7 +17,7 @@ import type {
   SavedPrintFill
 } from '../lib/types'
 import { clamp } from '../lib/units'
-import { IconButton } from './Icon'
+import Icon, { IconButton } from './Icon'
 import LabelCanvas from './LabelCanvas'
 import NumberField from './NumberField'
 
@@ -35,6 +35,7 @@ interface PrintViewProps {
   lastPrintedAt: number | null
   history: SavedPrintFill[]
   onValueChange: (key: string, value: FieldValue) => void
+  onReorderInputs: (orderedIds: string[]) => void
   onCopiesChange: (copies: number) => void
   onLoadTemplate: (id: string) => void
   onPrint: () => void
@@ -63,6 +64,7 @@ export default function PrintView({
   lastPrintedAt,
   history,
   onValueChange,
+  onReorderInputs,
   onCopiesChange,
   onLoadTemplate,
   onPrint,
@@ -73,6 +75,8 @@ export default function PrintView({
 }: PrintViewProps) {
   const firstInput = useRef<HTMLInputElement | null>(null)
   const [attempted, setAttempted] = useState(false)
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [drop, setDrop] = useState<{ id: string; place: 'before' | 'after' } | null>(null)
   const inputs = inputsOf(elements)
   const missing = missingInputs(elements, values)
   const missingKeys = new Set(missing.map((input) => input.key))
@@ -145,23 +149,85 @@ export default function PrintView({
                   ? 'All inputs are filled. Print when you are ready, or reuse a saved set.'
                   : `Fill in ${missing.map((input) => input.label || input.key).join(', ')} before printing.`}
               </p>
+              {inputs.length > 1 && (
+                <p className="panel-hint">Drag the handle to change the order these fields appear.</p>
+              )}
 
               <div className="print-fields">
                 {inputs.map((field, index) => (
-                  <PrintField
+                  <div
                     key={field.id}
-                    field={field}
-                    index={index}
-                    firstInput={firstInput}
-                    value={values[field.key]}
-                    suggestions={previousTextValues(history, field.key)}
-                    showError={attempted && missingKeys.has(field.key)}
-                    onValueChange={onValueChange}
-                    onPrint={() => {
-                      setAttempted(true)
-                      onPrint()
+                    className={[
+                      'print-field-row',
+                      dragId === field.id ? 'is-dragging' : '',
+                      drop?.id === field.id ? `is-drop-${drop.place}` : ''
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    onDragOver={(event: DragEvent<HTMLDivElement>) => {
+                      if (!dragId || dragId === field.id) return
+                      event.preventDefault()
+                      event.dataTransfer.dropEffect = 'move'
+                      const rect = event.currentTarget.getBoundingClientRect()
+                      const place = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+                      setDrop({ id: field.id, place })
                     }}
-                  />
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      const sourceId = dragId
+                      if (!sourceId || sourceId === field.id) {
+                        setDragId(null)
+                        setDrop(null)
+                        return
+                      }
+                      const rect = event.currentTarget.getBoundingClientRect()
+                      const place = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+                      const without = inputs.filter((input) => input.id !== sourceId)
+                      const targetIndex = without.findIndex((input) => input.id === field.id)
+                      const insertAt = place === 'before' ? targetIndex : targetIndex + 1
+                      const moved = inputs.find((input) => input.id === sourceId)
+                      if (moved && targetIndex >= 0) {
+                        const next = [...without.slice(0, insertAt), moved, ...without.slice(insertAt)]
+                        onReorderInputs(next.map((input) => input.id))
+                      }
+                      setDragId(null)
+                      setDrop(null)
+                    }}
+                  >
+                    {inputs.length > 1 && (
+                      <span
+                        className="layer-grip"
+                        title="Drag to reorder"
+                        role="button"
+                        aria-label={`Reorder ${field.label || field.key}`}
+                        draggable
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = 'move'
+                          event.dataTransfer.setData('text/plain', field.id)
+                          setDragId(field.id)
+                        }}
+                        onDragEnd={() => {
+                          setDragId(null)
+                          setDrop(null)
+                        }}
+                      >
+                        <Icon name="grip" size={14} />
+                      </span>
+                    )}
+                    <PrintField
+                      field={field}
+                      index={index}
+                      firstInput={firstInput}
+                      value={values[field.key]}
+                      suggestions={previousTextValues(history, field.key)}
+                      showError={attempted && missingKeys.has(field.key)}
+                      onValueChange={onValueChange}
+                      onPrint={() => {
+                        setAttempted(true)
+                        onPrint()
+                      }}
+                    />
+                  </div>
                 ))}
               </div>
             </>

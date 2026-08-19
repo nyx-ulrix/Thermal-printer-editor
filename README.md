@@ -2,7 +2,7 @@
 
 A Windows desktop app for designing thermal labels and printing them on a Gprinter GP-3120TL. You lay out the label on a live preview, save it as a template, then fill in values and print a run — without changing the paper size in Windows printer preferences.
 
-**[Download Receipt Printer Editor Setup 1.0.0.exe](https://github.com/MalcolmLiew/thermal-printer-editor/releases/latest)**
+**[Download the latest Windows installer](https://github.com/MalcolmLiew/thermal-printer-editor/releases/latest)**
 
 ## Features
 
@@ -13,6 +13,7 @@ A Windows desktop app for designing thermal labels and printing them on a Gprint
 - Click text on the label to retype it; the box grows with what you type
 - Drop an image onto the label to place it, then adjust threshold, dither, and invert for thermal output
 - Group elements into rows or columns, with padding and gap
+- Drag layers to reorder them; click a group’s arrow to hide its children
 - Undo and redo while you design
 
 ### Media
@@ -35,6 +36,7 @@ A Windows desktop app for designing thermal labels and printing them on a Gprint
 
 ### Print
 - Fill in text or image inputs without changing the design
+- Drag input fields to choose the order they appear on the Print page
 - Count-up fields bump serial numbers after each successful print, keeping zero padding
 - Reuse values from the last run, or pick a saved fill
 - Choose printer, copies, and send the job as raw TSPL so the driver does not rewrite the label

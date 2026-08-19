@@ -191,6 +191,52 @@ export function cloneElement(element: LabelElement, newId: () => string): LabelE
   return copy
 }
 
+export function moveElementAmongSiblings(
+  elements: LabelElement[],
+  movedId: string,
+  targetId: string,
+  place: 'before' | 'after'
+): LabelElement[] {
+  if (movedId === targetId) return elements
+  if (isDescendantOf(elements, targetId, movedId)) return elements
+
+  const movedParent = parentGroupOf(elements, movedId)
+  const targetParent = parentGroupOf(elements, targetId)
+  if (movedParent?.id !== targetParent?.id) return elements
+
+  const list = movedParent ? movedParent.children : elements
+  const moved = list.find((element) => element.id === movedId)
+  if (!moved) return elements
+
+  const without = list.filter((element) => element.id !== movedId)
+  const targetIndex = without.findIndex((element) => element.id === targetId)
+  if (targetIndex < 0) return elements
+
+  const insertAt = place === 'before' ? targetIndex : targetIndex + 1
+  const nextList = [...without.slice(0, insertAt), moved, ...without.slice(insertAt)]
+  if (!movedParent) return nextList
+  return updateById(elements, movedParent.id, (element) =>
+    element.type === 'group' ? layoutGroup({ ...element, children: nextList }) : element
+  )
+}
+
+export function assignPrintOrder(elements: LabelElement[], orderedIds: string[]): LabelElement[] {
+  const rank = new Map(orderedIds.map((id, index) => [id, index]))
+  function visit(items: LabelElement[]): LabelElement[] {
+    return items.map((element) => {
+      if (element.type === 'input') {
+        const order = rank.get(element.id)
+        if (order != null) return { ...element, printOrder: order }
+      }
+      if (element.type === 'group') {
+        return { ...element, children: visit(element.children) }
+      }
+      return element
+    })
+  }
+  return visit(elements)
+}
+
 export function layerById(
   elements: LabelElement[],
   id: string,

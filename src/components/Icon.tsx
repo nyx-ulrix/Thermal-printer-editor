@@ -54,6 +54,8 @@ export type IconName =
   | 'bookmark'
   | 'settings'
   | 'x'
+  | 'grip'
+  | 'chevron'
 
 const ICONS: Record<IconName, ReactNode> = {
   home: (
@@ -367,7 +369,18 @@ const ICONS: Record<IconName, ReactNode> = {
       <path d="M12 3.2v2.1M12 18.7v2.1M4.6 6.5l1.5 1.5M17.9 16l1.5 1.5M3.2 12h2.1M18.7 12h2.1M4.6 17.5l1.5-1.5M17.9 8l1.5-1.5" />
     </>
   ),
-  x: <path d="M7 7l10 10M17 7 7 17" />
+  x: <path d="M7 7l10 10M17 7 7 17" />,
+  grip: (
+    <>
+      <circle cx="9" cy="7" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="7" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="12" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="12" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="17" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="17" r="1.15" fill="currentColor" stroke="none" />
+    </>
+  ),
+  chevron: <path d="m9 6 6 6-6 6" />
 }
 
 interface IconProps {

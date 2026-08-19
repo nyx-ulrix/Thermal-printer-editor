@@ -96,7 +96,15 @@ function alignBlockY(align: VerticalAlign, blockHeightMm: number, boxHeightMm: n
 }
 
 export function inputsOf(elements: LabelElement[]): InputElement[] {
-  return inputsIn(elements)
+  const inputs = inputsIn(elements)
+  return [...inputs].sort((left, right) => {
+    const leftOrder = left.printOrder
+    const rightOrder = right.printOrder
+    if (leftOrder == null && rightOrder == null) return 0
+    if (leftOrder == null) return 1
+    if (rightOrder == null) return -1
+    return leftOrder - rightOrder
+  })
 }
 
 export function normalizeLabelElement(element: LabelElement): LabelElement {
@@ -126,7 +134,8 @@ export function normalizeLabelElement(element: LabelElement): LabelElement {
         : 8,
     textStyle: migrateTextStyle(stored.textStyle),
     textAlign: inputTextAlign(stored),
-    verticalAlign: inputVerticalAlign(stored)
+    verticalAlign: inputVerticalAlign(stored),
+    printOrder: Number.isFinite(stored.printOrder) ? Number(stored.printOrder) : undefined
   }
 }
 

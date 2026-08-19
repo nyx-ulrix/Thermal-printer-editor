@@ -111,6 +111,8 @@ export interface InputElement extends ElementBase {
   /** How print-time text sits inside the slot. */
   textAlign: TextAlign
   verticalAlign: VerticalAlign
+  /** Lower values appear first on the Print page. Missing values keep tree order. */
+  printOrder?: number
 }
 
 export type GroupDirection = 'row' | 'column'

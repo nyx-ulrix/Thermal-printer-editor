@@ -50,7 +50,7 @@ import {
   saveSession,
   saveTemplates
 } from './lib/storage'
-import { cloneElement, findElement, groupSelected, groupingSiblingIds, isImageLike, layerById, moveRootOf, patchElement, removeById } from './lib/tree'
+import { cloneElement, findElement, groupSelected, groupingSiblingIds, isImageLike, layerById, assignPrintOrder, moveElementAmongSiblings, moveRootOf, patchElement, removeById } from './lib/tree'
 import { collectStyledText, defaultTextStyle, isStyledText, textStyleOf, textStylePatch } from './lib/fontSize'
 import { buildRasterTsplBytes, buildTsplBytes, tsplMediaHeader } from './lib/tspl'
 import type {
@@ -1022,6 +1022,9 @@ export default function App() {
               onRename={(id, layerName) =>
                 updateElement(id, { layerName: layerName.trim() || undefined })
               }
+              onReorder={(movedId, targetId, place) =>
+                applyElements((current) => moveElementAmongSiblings(current, movedId, targetId, place))
+              }
               onToggleTspl={() => setShowTspl((current) => !current)}
               onCopyTspl={copyTspl}
             />
@@ -1136,6 +1139,9 @@ export default function App() {
             history={printHistory[valuesKey] ?? []}
             onValueChange={(key, value) =>
               setValues((current) => ({ ...current, [key]: value }))
+            }
+            onReorderInputs={(orderedIds) =>
+              applyElements((current) => assignPrintOrder(current, orderedIds))
             }
             onCopiesChange={setCopies}
             onLoadTemplate={(id) => loadTemplate(id, 'print')}

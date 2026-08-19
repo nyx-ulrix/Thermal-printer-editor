@@ -246,6 +246,6 @@ export function describeElement(element: LabelElement): string {
     case 'input':
       return `Input: ${element.label || element.key}`
     case 'group':
-      return `Group (${element.children.length})`
+      return 'Group'
   }
 }

@@ -704,17 +704,17 @@ input[type='range'] {
 
 .element-row {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
   width: 100%;
-  padding: var(--space-2) var(--space-1);
+  min-height: 28px;
+  padding: 3px 6px;
   background-color: transparent;
   border: 0;
   border-bottom: 1px solid var(--stroke-default);
   border-left: 2px solid transparent;
   text-align: left;
-  cursor: pointer;
 }
 
 .element-row:hover {
@@ -725,15 +725,73 @@ input[type='range'] {
   border-left-color: var(--accent-interactive);
 }
 
+.element-row.is-dragging {
+  opacity: 0.45;
+}
+
+.element-row.is-drop-before {
+  box-shadow: inset 0 2px 0 var(--accent-interactive);
+}
+
+.element-row.is-drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent-interactive);
+}
+
+.layer-grip,
+.layer-chevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: var(--ink-quaternary);
+  background: transparent;
+  border: 0;
+  cursor: grab;
+}
+
+.layer-grip:active {
+  cursor: grabbing;
+}
+
+.layer-chevron {
+  cursor: pointer;
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+.layer-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.layer-chevron-spacer {
+  flex-shrink: 0;
+  width: 18px;
+}
+
+.layer-label {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
 .element-name {
+  display: block;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-display);
-  font-size: var(--text-h3);
-  font-weight: var(--weight-semibold);
-  line-height: var(--leading-normal);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  line-height: 1.3;
   color: var(--ink-primary);
 }
 
@@ -742,11 +800,13 @@ input[type='range'] {
 }
 
 .element-name-input {
+  flex: 1;
+  min-width: 0;
   width: 100%;
-  padding: 2px 4px;
-  font-family: var(--font-display);
-  font-size: var(--text-h3);
-  font-weight: var(--weight-semibold);
+  padding: 1px 4px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
 }
 
 .element-meta {
@@ -1642,9 +1702,36 @@ input[type='range'] {
 }
 
 .print-fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: var(--space-3);
+}
+
+.print-field-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.print-field-row .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.print-field-row .layer-grip {
+  margin-top: 22px;
+}
+
+.print-field-row.is-dragging {
+  opacity: 0.45;
+}
+
+.print-field-row.is-drop-before {
+  box-shadow: inset 0 2px 0 var(--accent-interactive);
+}
+
+.print-field-row.is-drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent-interactive);
 }
 
 .print-prompt {
@@ -1697,6 +1784,9 @@ input[type='range'] {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
+  font-family: var(--font-display);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-semibold);
 }
 
 .saved-fill .mini-button {
@@ -1930,7 +2020,19 @@ input[type='range'] {
 }
 
 .template-row .element-row {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: var(--space-2) var(--space-1);
+  cursor: pointer;
   border-left: 0;
+}
+
+.template-row .element-name {
+  font-family: var(--font-display);
+  font-size: var(--text-h3);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-normal);
 }
 
 .font-library {
