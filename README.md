@@ -55,6 +55,25 @@ Windows 10 or 11. Install the Gprinter GP-3120TL driver so the printer appears i
 
 Templates stay on this computer as editable design files in the app data folder. Opening one restores the layout so you can keep changing it.
 
+## Kanban board and print agent
+
+`kanban/` is a hosted kanban board and resource monitor; `agent/` is a small Linux service that sits next to the printer and prints task labels.
+
+- **Pub/sub store.** Every change is an event (`task.created`, `task.updated`, `task.deleted`, `print.requested`, `print.finished`) published on a topic and appended to a log before subscribers see it. The board is the fold of that log. Deployed, the log lives in the Deployer project's MariaDB (`kanban_events`); locally it is `kanban/data/events.jsonl`.
+- **Live board.** Browsers subscribe over Server-Sent Events; the print agent holds a pull subscription to the print topic (`POST /api/agent/poll`) and acks each job.
+- **Printing.** Print on a card queues a job. While the printer is inactive (agent offline or device missing) jobs stay queued and print once it comes back.
+- **Resource monitor.** The agent reports CPU, memory, disk, load and temperature of the printer server with every poll.
+
+Run the board locally (Node 20+, no dependencies):
+
+```bash
+cd kanban && ALLOW_OPEN_BOARD=1 AGENT_TOKEN=dev-token npm start
+```
+
+Server environment: `BOARD_KEY` (the board passcode), `AGENT_TOKEN` (shared with the print agent), `PORT`. On Deployer, `DEPLOYER_URL`, `DEPLOYER_PROJECT_ID` and `DEPLOYER_API_KEY` (a `service` key) switch storage to the project database. Tests: `cd kanban && npm test`.
+
+The Linux agent is in [agent/README.md](agent/README.md).
+
 ## Develop
 
 Needs Node.js 20 or later.

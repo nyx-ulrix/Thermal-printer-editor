@@ -1,0 +1,14 @@
+{
+  "name": "thermal-kanban",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kanban board and resource monitor that prints tasks on the thermal label printer",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test"
+  }
+}

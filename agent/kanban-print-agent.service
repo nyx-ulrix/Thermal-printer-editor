@@ -1,0 +1,26 @@
+[Unit]
+Description=Kanban print agent (TSPL thermal label printer)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=kanban-print
+EnvironmentFile=/etc/kanban-print-agent.env
+ExecStart=/usr/bin/python3 -I /opt/kanban-print-agent/printer_agent.py
+Restart=always
+RestartSec=5
+
+# Hardening. /dev, /proc and /sys stay reachable (no PrivateDevices) so the agent can
+# write /dev/usb/lp0 (via group lp) and read /proc stats and /sys/class/thermal.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

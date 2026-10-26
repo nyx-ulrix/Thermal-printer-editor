@@ -4,3 +4,8 @@ release/
 dist/
 *.log
 .DS_Store
+
+graphify-out/
+design-refs/
+kanban/data/
+__pycache__/
