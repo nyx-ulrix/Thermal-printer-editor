@@ -52,6 +52,27 @@ function whenSaved(updatedAt: number): string {
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : ''
 }
 
+type MoveControl = 'grip' | 'up' | 'down'
+
+/**
+ * After a keyboard or button move the row's DOM node is re-inserted, which
+ * drops focus; put it back on the same control (or its nearest usable sibling).
+ */
+function refocusMoveControl(root: HTMLElement | null, id: string, control: MoveControl) {
+  if (!root) return
+  const order: MoveControl[] =
+    control === 'grip' ? ['grip', 'up', 'down'] : [control, control === 'up' ? 'down' : 'up', 'grip']
+  for (const candidate of order) {
+    const target = root.querySelector<HTMLButtonElement>(
+      `[data-move-id="${CSS.escape(id)}"][data-move-control="${candidate}"]`
+    )
+    if (target && !target.disabled && target.offsetParent !== null) {
+      target.focus()
+      return
+    }
+  }
+}
+
 const PREVIEW_ZOOM = 2
 const NARROW_QUERY = '(max-width: 820px)'
 
@@ -107,6 +128,9 @@ export default function PrintView({
   const [attempted, setAttempted] = useState(false)
   const [dragId, setDragId] = useState<string | null>(null)
   const [drop, setDrop] = useState<{ id: string; place: 'before' | 'after' } | null>(null)
+  const fieldsRef = useRef<HTMLDivElement | null>(null)
+  const pendingFocus = useRef<{ id: string; control: MoveControl } | null>(null)
+  const [announcement, setAnnouncement] = useState('')
   const inputs = inputsOf(elements)
   const missing = missingInputs(elements, values)
   const missingKeys = new Set(missing.map((input) => input.key))
@@ -131,6 +155,37 @@ export default function PrintView({
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [onPrint])
+
+  useEffect(() => {
+    const pending = pendingFocus.current
+    if (!pending) return
+    pendingFocus.current = null
+    refocusMoveControl(fieldsRef.current, pending.id, pending.control)
+  }, [elements])
+
+  /** Shared by drag-and-drop and the keyboard / touch move controls. */
+  function moveInput(sourceId: string, targetId: string, place: 'before' | 'after'): boolean {
+    const without = inputs.filter((input) => input.id !== sourceId)
+    const targetIndex = without.findIndex((input) => input.id === targetId)
+    const insertAt = place === 'before' ? targetIndex : targetIndex + 1
+    const moved = inputs.find((input) => input.id === sourceId)
+    if (!moved || targetIndex < 0) return false
+    const next = [...without.slice(0, insertAt), moved, ...without.slice(insertAt)]
+    onReorderInputs(next.map((input) => input.id))
+    return true
+  }
+
+  function stepInput(index: number, direction: 'up' | 'down', control: MoveControl) {
+    const field = inputs[index]
+    const target = inputs[direction === 'up' ? index - 1 : index + 1]
+    if (!field || !target) return
+    pendingFocus.current = { id: field.id, control }
+    if (moveInput(field.id, target.id, direction === 'up' ? 'before' : 'after')) {
+      setAnnouncement(
+        `Moved "${field.label || field.key}" to position ${direction === 'up' ? index : index + 2} of ${inputs.length}.`
+      )
+    }
+  }
 
   const sorted = [...templates].sort((a, b) => b.updatedAt - a.updatedAt)
 
@@ -225,10 +280,17 @@ export default function PrintView({
                   : `Fill in ${missing.map((input) => input.label || input.key).join(', ')} before printing.`}
               </p>
               {inputs.length > 1 && (
-                <p className="panel-hint">Drag the handle to change the order these fields appear.</p>
+                <p className="panel-hint">
+                  <span className="only-fine-pointer">
+                    Drag the handle to change the order these fields appear.
+                  </span>
+                  <span className="only-coarse-pointer">
+                    Use the arrows to change the order these fields appear.
+                  </span>
+                </p>
               )}
 
-              <div className="print-fields">
+              <div className="print-fields" ref={fieldsRef}>
                 {inputs.map((field, index) => (
                   <div
                     key={field.id}
@@ -257,25 +319,26 @@ export default function PrintView({
                       }
                       const rect = event.currentTarget.getBoundingClientRect()
                       const place = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
-                      const without = inputs.filter((input) => input.id !== sourceId)
-                      const targetIndex = without.findIndex((input) => input.id === field.id)
-                      const insertAt = place === 'before' ? targetIndex : targetIndex + 1
-                      const moved = inputs.find((input) => input.id === sourceId)
-                      if (moved && targetIndex >= 0) {
-                        const next = [...without.slice(0, insertAt), moved, ...without.slice(insertAt)]
-                        onReorderInputs(next.map((input) => input.id))
-                      }
+                      moveInput(sourceId, field.id, place)
                       setDragId(null)
                       setDrop(null)
                     }}
                   >
                     {inputs.length > 1 && (
-                      <span
+                      <button
+                        type="button"
                         className="layer-grip"
-                        title="Drag to reorder"
-                        role="button"
-                        aria-label={`Reorder ${field.label || field.key}`}
+                        title="Drag to reorder, or press the up and down arrow keys"
+                        aria-label={`Move "${field.label || field.key}"`}
+                        aria-keyshortcuts="ArrowUp ArrowDown"
+                        data-move-id={field.id}
+                        data-move-control="grip"
                         draggable
+                        onKeyDown={(event) => {
+                          if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+                          event.preventDefault()
+                          stepInput(index, event.key === 'ArrowUp' ? 'up' : 'down', 'grip')
+                        }}
                         onDragStart={(event) => {
                           event.dataTransfer.effectAllowed = 'move'
                           event.dataTransfer.setData('text/plain', field.id)
@@ -287,7 +350,7 @@ export default function PrintView({
                         }}
                       >
                         <Icon name="grip" size={14} />
-                      </span>
+                      </button>
                     )}
                     <PrintField
                       field={field}
@@ -302,9 +365,40 @@ export default function PrintView({
                         onPrint()
                       }}
                     />
+                    {inputs.length > 1 && (
+                      <span className="layer-move-buttons">
+                        <button
+                          type="button"
+                          className="layer-move is-up"
+                          title="Move up"
+                          aria-label={`Move "${field.label || field.key}" up`}
+                          data-move-id={field.id}
+                          data-move-control="up"
+                          disabled={index === 0}
+                          onClick={() => stepInput(index, 'up', 'up')}
+                        >
+                          <Icon name="chevron" size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="layer-move is-down"
+                          title="Move down"
+                          aria-label={`Move "${field.label || field.key}" down`}
+                          data-move-id={field.id}
+                          data-move-control="down"
+                          disabled={index === inputs.length - 1}
+                          onClick={() => stepInput(index, 'down', 'down')}
+                        >
+                          <Icon name="chevron" size={14} />
+                        </button>
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
+              <p className="visually-hidden" aria-live="polite">
+                {announcement}
+              </p>
             </>
           )}
 
@@ -344,7 +438,9 @@ export default function PrintView({
             />
           </div>
 
-          <p className="panel-hint">Ctrl+Enter prints from anywhere on this page.</p>
+          <p className="panel-hint only-fine-pointer">
+            Ctrl+Enter prints from anywhere on this page.
+          </p>
         </section>
 
         {inputs.length > 0 && (

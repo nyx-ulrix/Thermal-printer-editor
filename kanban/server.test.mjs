@@ -1020,6 +1020,10 @@ test('task prints: one waiting label per task; a print racing its task deletion 
     assert.equal(first.status, 202)
     assert.equal(again.status, 200)
     assert.equal(again.json.id, first.json.id)
+    // Presses at the same moment (two tabs) still make one label.
+    const other = await request(port, '/api/tasks', { method: 'POST', headers: H, body: { title: 'race' } })
+    const burst = await Promise.all([1, 2, 3, 4, 5].map(() => request(port, `/api/tasks/${other.json.id}/print`, { method: 'POST', headers: H })))
+    assert.equal(new Set(burst.map((r) => r.json.id)).size, 1)
   } finally {
     server.close()
     await rm(dir, { recursive: true, force: true })

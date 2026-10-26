@@ -190,7 +190,7 @@ fieldset.field legend{margin-bottom:6px;padding:0}
 /* tight enough that Print, both arrows and Edit/Delete share one row in a 1440 board column */
 .actions .more{display:flex;gap:8px;margin-left:auto}
 .actions .btn.solid{padding-inline:8px}
-.actions .link{padding:8px 1px;letter-spacing:.06em}
+.actions .link{padding:8px 1px;letter-spacing:.06em;min-height:36px;display:inline-flex;align-items:center}
 .btn.mv{min-width:40px;padding:2px 8px;font-size:18px;letter-spacing:0;line-height:1}
 .actions .ask{font-size:12px;font-weight:700;flex-basis:100%}
 .grip{display:none}
@@ -244,6 +244,8 @@ fieldset.field legend{margin-bottom:6px;padding:0}
   .foot .fine{display:none}
   .foot .coarse{display:inline}
   .actions .link,.account .link,.mon-head .link{min-height:42px;display:inline-flex;align-items:center}
+  .actions .link{min-width:42px;justify-content:center}
+  #signin{min-height:42px;display:inline-flex;align-items:center}
 }
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{transition:none!important;animation:none!important}

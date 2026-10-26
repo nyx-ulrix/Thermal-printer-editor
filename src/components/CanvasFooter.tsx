@@ -54,7 +54,16 @@ export default function CanvasFooter({
           ? 'Converting images...'
           : mode === 'line'
             ? `Drag across the ${continuous ? 'paper' : 'label'} to draw a line`
-            : 'Click text to edit, drag to move, drag a handle to resize'}
+            : (
+              <>
+                <span className="only-fine-pointer">
+                  Click text to edit, drag to move, drag a handle to resize
+                </span>
+                <span className="only-coarse-pointer">
+                  Tap text to edit, drag to move, drag a handle to resize
+                </span>
+              </>
+            )}
       </span>
 
       <div className="zoom-control">
@@ -63,7 +72,7 @@ export default function CanvasFooter({
           type="range"
           min={minZoom}
           max={MAX_ZOOM}
-          step={0.5}
+          step={minZoom < 1 ? 0.25 : 0.5}
           value={zoom}
           aria-label="Preview zoom"
           onChange={(event) => onZoomChange(Number(event.target.value))}

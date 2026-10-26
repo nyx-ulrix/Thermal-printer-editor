@@ -756,6 +756,48 @@ input[type='range'] {
   cursor: grabbing;
 }
 
+.layer-grip:hover,
+.layer-grip:focus-visible {
+  color: var(--ink-secondary);
+}
+
+/* Move up / down buttons: touch-only stand-in for dragging the grip. */
+.layer-move-buttons {
+  display: none;
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+.layer-move {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--ink-tertiary);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.layer-move:disabled {
+  color: var(--ink-quaternary);
+  opacity: 0.4;
+  cursor: default;
+}
+
+.layer-move.is-up .ui-icon {
+  transform: rotate(-90deg);
+}
+
+.layer-move.is-down .ui-icon {
+  transform: rotate(90deg);
+}
+
+/* Copy that differs between mouse and touch: fine pointers see the first. */
+.only-coarse-pointer {
+  display: none;
+}
+
 .layer-chevron {
   cursor: pointer;
   transform: rotate(0deg);
@@ -2335,14 +2377,16 @@ input[type='range'] {
   }
 
   /* Masthead: name and the two actions on the first row, page tabs (and
-   * undo/redo while designing) on the second, printer and copies on the third. */
+   * undo/redo while designing) on the second, the printer across the third so
+   * its full name fits, and refresh and copies on the fourth. */
   .toolbar {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
     grid-template-areas:
       'brand brand actions'
       'nav history history'
-      'printer refresh copies'
+      'printer printer printer'
+      '. refresh copies'
       'status status status';
     align-items: end;
     gap: var(--space-3) var(--space-2);
@@ -2505,5 +2549,47 @@ input[type='range'] {
   input[type='number'],
   select {
     min-height: 44px;
+  }
+
+  .chip.is-icon {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Layer rows and print inputs: dragging does not work by touch, so the grip
+   * gives way to explicit move up / move down buttons. */
+  .layer-grip {
+    display: none;
+  }
+
+  .layer-move-buttons {
+    display: inline-flex;
+  }
+
+  .layer-chevron,
+  .layer-move {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .layer-chevron-spacer {
+    width: 44px;
+  }
+
+  .layer-label {
+    align-self: stretch;
+    min-height: 44px;
+  }
+
+  .print-field-row .layer-move-buttons {
+    align-self: flex-end;
+  }
+
+  .only-coarse-pointer {
+    display: revert;
+  }
+
+  .only-fine-pointer {
+    display: none;
   }
 }

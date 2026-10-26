@@ -8,13 +8,14 @@ Last updated 2026-10-26 (tooling moved to the Linux machine that also hosts Depl
 |---|---|---|
 | Pub/sub server | `kanban/server.mjs`, tests in `kanban/server.test.mjs` | Done, incl. Google sign-in, editor site, editor storage and raw prints (`docs/WEB.md`). `cd kanban && npm test` passes (12 tests). Node 20+, no dependencies. |
 | Editor web build | `src/web/`, `vite.web.config.ts`, `npm run build:web` / `npm run start:web` | Done. Electron build unchanged. |
-| Web UI | `kanban/public/index.html` (one file, inline CSS/JS) | Built, visually reviewed by its builder at desktop and mobile. **Stopped mid-way through interaction testing**: drag and drop, inline edit and delete-confirm were not yet re-checked after the last layout change. |
-| Linux print agent | `agent/` (`printer_agent.py`, `install.sh`, systemd unit, env example, README) | Done. `python -I agent/printer_agent.py --self-test` passes. Not yet run on Linux or a real printer. |
-| End-to-end | server + agent + a file standing in for `/dev/usb/lp0` | Passed: task → log → agent → TSPL → `print.finished`. A title containing `"\r\nPRINT 9,9` stayed inside one TEXT string. |
+| Web UI | `kanban/public/index.html` (one file, inline CSS/JS) | Done. Interaction-checked in a browser at 1440 px and 375 px touch (drag, keyboard moves, edit, delete confirm, print, sign-in/out); four UI audit rounds. |
+| Linux print agent | `agent/` (`printer_agent.py`, `install.sh`, systemd unit, env example, README) | Done: task and raw jobs, persisted state (`/var/lib/kanban-print-agent`) so restarts never reprint, transient printer errors retried. `python3 -I agent/printer_agent.py --self-test` passes. Not yet run against a real printer. |
+| End-to-end | server + agent + a file standing in for `/dev/usb/lp0` | Passed for task labels and raw editor prints (bytes unchanged). A title containing `"\r\nPRINT 9,9` stayed inside one TEXT string. |
+| Audits | `docs/audits/2026-10-26-round-{1..4}.md` | Four rounds (security, correctness, UI). Every finding at medium or above fixed; accepted lows listed in each record. |
 | Design rules | `STYLE_GUIDE.md` | Written. |
-| Knowledge graph | `graphify-out/` (git-ignored) | Not on this machine yet (the clone has no `graphify-out/`): build it with `/graphify .`, then refresh after code changes with `/graphify . --update`. graphify is installed through pipx (`pipx install graphifyy && graphify install`). |
+| Knowledge graph | `graphify-out/` (git-ignored) | Built; code refreshed 2026-10-26 with `graphify update .` (1034 nodes). Doc changes are not re-extracted yet: run `/graphify . --update` for those. |
 
-Not done yet: **security audit, taste audit, deploy.** See "Next steps".
+Not done yet: **deploy** (needs the user: Google OAuth client and secrets). See "Next steps".
 
 ## How it works (one paragraph each)
 
@@ -22,7 +23,7 @@ Not done yet: **security audit, taste audit, deploy.** See "Next steps".
 
 **Subscribers.** Browsers hold an SSE stream (`GET /api/stream`): a snapshot, then every event. `printer` and `resources` are ephemeral topics (not persisted). The print agent holds a pull subscription: `POST /api/agent/poll` every 3 s with its stats, printer readiness and results of jobs it finished; the reply carries up to 10 due jobs. Jobs are only handed out while the agent says the printer is ready, so while the printer is inactive they stay `queued` and print when it comes back. A `sent` job with no result after 60 s is handed out again; the agent remembers the last 200 finished job ids so a lost ack does not reprint.
 
-**Auth.** Google sign-in (OAuth code + PKCE) on both sites, limited to `ALLOWED_EMAILS`; signed `sid` cookie (HMAC with `SESSION_SECRET`, 30 days; rotate the secret to log everyone out). Every non-GET API call must also carry `X-Requested-With: kanban`. Agent: `Authorization: Bearer AGENT_TOKEN`. Board CSP allows only its own inline script by hash. Full contract: `docs/WEB.md`.
+**Auth.** Google sign-in (OAuth code + PKCE) on both sites, limited to `ALLOWED_EMAILS`; server-side sessions (`__Host-sid` cookie on https, 7 days sliding; sign-out ends the session on the server). Every non-GET API call must also carry `X-Requested-With: kanban`. Agent: `Authorization: Bearer AGENT_TOKEN`. Board CSP allows only its own inline script by hash. Full contract: `docs/WEB.md`.
 
 **Two sites, one server.** The host picks the site: `kanban.liewjiaen.com` is the board, `printer-editor.liewjiaen.com` is the label editor's web build (`npm run build:web` → `web-dist/`, bridge in `src/web/`). Editor settings and templates live in table `editor_kv`; editor prints are raw TSPL jobs (`kind: "raw"`) that the agent writes to the printer unchanged.
 
@@ -35,7 +36,7 @@ The user always deploys to this instance. **It runs on this same Linux machine**
 - Project **Thermal Kanban**, id `a4cd4446-734a-4006-a445-aa72e3ea5cea`, managed MariaDB `main-sql` (healthy).
 - API key **kanban-app**, role `service`, created. Do not copy its secret anywhere: attach it to the app (`api_key_id`), which injects `DEPLOYER_URL`, `DEPLOYER_PROJECT_ID`, `DEPLOYER_API_KEY`.
 - **App not created yet.** Create it under Deploys → New app: repo `https://github.com/nyx-ulrix/Thermal-printer-editor`, branch `main`, root dir `.` (repo root), preset `node`, install `ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci`, build `npm run build:web`, start `npm run start:web`, attach key `kanban-app`. No database access tick needed (it uses the data API). Then deploy, follow the build log, and add both hostnames `kanban.liewjiaen.com` and `printer-editor.liewjiaen.com` under the app's Domains.
-- **The user types the secrets** into the app's Environment themselves (never in chat): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google OAuth web client; redirect URIs `https://kanban.liewjiaen.com/auth/callback` and `https://printer-editor.liewjiaen.com/auth/callback`), `ALLOWED_EMAILS`, `SESSION_SECRET` (`openssl rand -hex 32`), `KANBAN_ORIGIN=https://kanban.liewjiaen.com`, `EDITOR_ORIGIN=https://printer-editor.liewjiaen.com` and `AGENT_TOKEN` (random, `openssl rand -hex 32`; the same value goes into the Linux server's `/etc/kanban-print-agent.env`).
+- **The user types the secrets** into the app's Environment themselves (never in chat): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google OAuth web client; redirect URIs `https://kanban.liewjiaen.com/auth/callback` and `https://printer-editor.liewjiaen.com/auth/callback`), `ALLOWED_EMAILS`, `SESSION_SECRET` (`openssl rand -hex 32`), `KANBAN_ORIGIN=https://kanban.liewjiaen.com`, `EDITOR_ORIGIN=https://printer-editor.liewjiaen.com` and `AGENT_TOKEN` (random, at least 32 characters, `openssl rand -hex 32`; the same value goes into the Linux server's `/etc/kanban-print-agent.env`).
 - Before any deploy, the deploy-website skill still asks the platform question; the answer so far has always been this instance.
 
 ## Linux server (printer side)
@@ -52,8 +53,10 @@ Details and troubleshooting: `agent/README.md`.
 
 ## Known limits (deliberate, marked `ponytail:` in code)
 
-- Boot replays the whole log; add a snapshot row around 100k events.
-- Agent job hand-out scans every job each poll; prune finished jobs if the log grows large.
+- Boot replays the whole log (raw label bytes live in their own table, so rows are small); add a snapshot row around 100k events.
+- Finished jobs leave memory after a day; queued raw labels expire after an hour; at most 50 raw labels wait at once.
+- Deploy the server and the print agent together: an older agent ignores the `expired` flag on stale raw jobs.
+- The Deployer SQL source must be MariaDB (the server uses `ADD COLUMN IF NOT EXISTS`).
 - A jammed USB printer can block the agent's write to `/dev/usb/lp0` with no timeout; `systemctl restart kanban-print-agent` clears it.
 - One server instance only (the broker is in-process). Several replicas would need a shared broker (Deployer has Redis).
 - The login rate limit keys on `cf-connecting-ip`, which is only trustworthy behind the Cloudflare tunnel.
@@ -62,10 +65,10 @@ Details and troubleshooting: `agent/README.md`.
 ## Next steps, in order
 
 1. ~~Finish UI interaction checks.~~ Done 2026-10-26 (Playwright library; the Playwright MCP server cannot launch here because there is no Chrome at `/opt/google/chrome/chrome`).
-2. **Audit loop** (below). Fix every confirmed finding; loop until a round comes back clean.
-3. **Commit, push to `main`.** The user approved pushing to `main` for this work.
+2. ~~Audit loop.~~ Done 2026-10-26, four rounds. See `docs/audits/`.
+3. ~~Commit, push to `main`.~~ Done.
 4. **Deploy** (Deployer section above), then point the Linux agent at the hostname and confirm the board shows PRINTER READY.
-5. Refresh the graph: `/graphify . --update` (or `/graphify .` if `graphify-out/` does not exist yet).
+5. ~~Refresh the graph.~~ Done 2026-10-26; refresh again after code changes with `/graphify . --update`.
 
 ## Working instructions for the next session
 

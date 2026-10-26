@@ -885,6 +885,7 @@ export async function start(env = process.env, hooks = {}) {
 
   // ---- the print topic ----
   const finishing = new Set() // job ids whose print.finished is being published
+  const taskPrinting = new Map() // task id -> its print request still being appended
 
   async function finish(result) {
     const job = state.jobs.get(result.jobId)
@@ -1395,11 +1396,18 @@ export async function start(env = process.env, hooks = {}) {
       if (!state.tasks.has(id)) throw new HttpError(404, 'No such task')
       if (print && method === 'POST') {
         // One waiting label per task: pressing Print again while it waits returns that job.
+        // Presses that arrive while the first is still being appended get its job too.
+        if (taskPrinting.has(id)) return sendJson(res, 200, await taskPrinting.get(id))
         const waiting = [...state.jobs.values()].find((j) => j.taskId === id && j.status === 'queued')
         if (waiting) return sendJson(res, 200, waiting)
         const jobId = randomUUID()
-        await broker.publish('print', 'print.requested', { jobId, kind: 'task', taskId: id })
-        return sendJson(res, 202, state.jobs.get(jobId))
+        const pending = broker.publish('print', 'print.requested', { jobId, kind: 'task', taskId: id }).then(() => state.jobs.get(jobId))
+        taskPrinting.set(id, pending)
+        try {
+          return sendJson(res, 202, await pending)
+        } finally {
+          taskPrinting.delete(id)
+        }
       }
       if (!print && method === 'PATCH') {
         const changes = validTask(await readJson(req), true)
