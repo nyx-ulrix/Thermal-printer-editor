@@ -376,7 +376,9 @@ function deployerApi({ url, key, projectId, sourceId }) {
 
   /** Runs SQL on the query endpoint; the last statement's rows as objects. */
   async function sql(query, maxRows = 500) {
-    source ??= sourceId || (await call(base)).find((s) => s.kind === 'sql')?.id
+    // API keys may not list data sources; the schema endpoint names them (sample=0 reads no rows).
+    source ??= sourceId || (await call(`${url.replace(/\/$/, '')}/projects/${projectId}/schema?sample=0`)).sources
+      ?.find((s) => s.kind === 'sql')?.source_id
     if (!source) throw new Error('No SQL data source in this Deployer project')
     const reply = await call(`${base}/${source}/query`, { method: 'POST', body: JSON.stringify({ query, max_rows: maxRows, timeout_seconds: 10 }) })
     const failed = reply.results?.find((r) => r.type === 'error')

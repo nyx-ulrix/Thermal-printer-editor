@@ -712,7 +712,7 @@ function fakeDeployer() {
       const body = raw ? JSON.parse(raw) : {}
       const url = new URL(req.url, 'http://x')
       const reply = (status, json) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(json))
-      if (url.pathname.endsWith('/data-sources')) return reply(200, [{ id: 'src', kind: 'sql' }])
+      if (url.pathname.endsWith('/schema')) return reply(200, { sources: [{ source_id: 'src', kind: 'sql' }] })
       if (url.pathname.endsWith('/query')) {
         fake.queries.push(body.query)
         let m

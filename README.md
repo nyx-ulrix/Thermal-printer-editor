@@ -70,7 +70,7 @@ Run the board locally (Node 20+, no dependencies):
 cd kanban && ALLOW_OPEN_BOARD=1 AGENT_TOKEN=dev-token npm start
 ```
 
-Server environment: `BOARD_KEY` (the board passcode), `AGENT_TOKEN` (shared with the print agent), `PORT`. On Deployer, `DEPLOYER_URL`, `DEPLOYER_PROJECT_ID` and `DEPLOYER_API_KEY` (a `service` key) switch storage to the project database. Tests: `cd kanban && npm test`.
+Server environment: Google sign-in (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ALLOWED_EMAILS`), `SESSION_SECRET`, `KANBAN_ORIGIN`, `EDITOR_ORIGIN`, `AGENT_TOKEN` (shared with the print agent), `PORT`; full list in `docs/WEB.md`. On Deployer, `DEPLOYER_URL`, `DEPLOYER_PROJECT_ID` and `DEPLOYER_API_KEY` (a `service` key) switch storage to the project database. Tests: `cd kanban && npm test`.
 
 The Linux agent is in [agent/README.md](agent/README.md).
 
