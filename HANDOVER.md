@@ -15,7 +15,7 @@ Last updated 2026-10-26 (tooling moved to the Linux machine that also hosts Depl
 | Design rules | `STYLE_GUIDE.md` | Written. |
 | Knowledge graph | `graphify-out/` (git-ignored) | Built; code refreshed 2026-10-26 with `graphify update .` (1034 nodes). Doc changes are not re-extracted yet: run `/graphify . --update` for those. |
 
-Not done yet: **deploy** (needs the user: Google OAuth client and secrets). See "Next steps".
+Not done yet: **deploy** is configured and builds; it needs only the Google OAuth client (user). See "Next steps".
 
 ## How it works (one paragraph each)
 
@@ -35,8 +35,8 @@ The user always deploys to this instance. **It runs on this same Linux machine**
 
 - Project **Thermal Kanban**, id `a4cd4446-734a-4006-a445-aa72e3ea5cea`, managed MariaDB `main-sql` (healthy).
 - API key **kanban-app**, role `service`, created. Do not copy its secret anywhere: attach it to the app (`api_key_id`), which injects `DEPLOYER_URL`, `DEPLOYER_PROJECT_ID`, `DEPLOYER_API_KEY`.
-- **App not created yet.** Create it under Deploys → New app: repo `https://github.com/nyx-ulrix/Thermal-printer-editor`, branch `main`, root dir `.` (repo root), preset `node`, install `ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci`, build `npm run build:web`, start `npm run start:web`, attach key `kanban-app`. No database access tick needed (it uses the data API). Then deploy, follow the build log, and add both hostnames `kanban.liewjiaen.com` and `printer-editor.liewjiaen.com` under the app's Domains.
-- **The user types the secrets** into the app's Environment themselves (never in chat): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Google OAuth web client; redirect URIs `https://kanban.liewjiaen.com/auth/callback` and `https://printer-editor.liewjiaen.com/auth/callback`), `ALLOWED_EMAILS`, `SESSION_SECRET` (`openssl rand -hex 32`), `KANBAN_ORIGIN=https://kanban.liewjiaen.com`, `EDITOR_ORIGIN=https://printer-editor.liewjiaen.com` and `AGENT_TOKEN` (random, at least 32 characters, `openssl rand -hex 32`; the same value goes into the Linux server's `/etc/kanban-print-agent.env`).
+- **App `thermal-kanban/thermal-kanban`** exists (created 2026-10-26): repo root, preset `node`, install `ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci`, build `npm run build:web`, start `npm run start:web`, key `kanban-app` attached, push-to-deploy on, domains `kanban.liewjiaen.com` and `printer-editor.liewjiaen.com` active. Set: `KANBAN_ORIGIN`, `EDITOR_ORIGIN`, `ALLOWED_EMAILS`, `SESSION_SECRET`, `AGENT_TOKEN`. The first deploy (2026-10-27) built cleanly and stopped at startup only because Google sign-in is not set.
+- **Left for the user:** create the Google OAuth web client and save it with `deployer google-oauth thermal-kanban/thermal-kanban` (prints the redirect URIs, asks for the ID and hidden secret), then `deployer deploy thermal-kanban/thermal-kanban --wait`. Read `AGENT_TOKEN` for the print agent with `deployer env list thermal-kanban/thermal-kanban --show`. The CLI is signed in on this machine (`deployer whoami`).
 - Before any deploy, the deploy-website skill still asks the platform question; the answer so far has always been this instance.
 
 ## Linux server (printer side)
