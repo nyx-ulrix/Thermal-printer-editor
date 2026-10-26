@@ -187,7 +187,8 @@ test('google sign-in: redirect, callback, allow list, state, server-side session
     assert.equal(params.get('redirect_uri'), 'https://editor.example.com/auth/callback')
     assert.equal(params.get('response_type'), 'code')
     assert.equal(params.get('scope'), 'openid email')
-    assert.equal(params.get('prompt'), 'select_account')
+    assert.equal(params.get('prompt'), null) // no account chooser unless asked for
+    assert.equal(params.get('login_hint'), null)
     assert.equal(params.get('code_challenge_method'), 'S256')
     assert.ok(params.get('state').length >= 32 && params.get('nonce').length >= 32)
     const setOauth = res.headers['set-cookie'][0]
@@ -231,12 +232,34 @@ test('google sign-in: redirect, callback, allow list, state, server-side session
     token = claimsFor(k.params)
     assert.equal((await finish('kanban.example.com', k.params, k.oauth)).headers.location, '/')
 
-    // Bad state, missing cookie: 400 with a retry link.
+    // login_hint: a plausible email is forwarded; junk is dropped; switch=1 asks for the chooser instead.
+    const loginTo = async (qs) => new URL((await request(port, `/auth/login?${qs}`, { host: 'editor.example.com' })).headers.location).searchParams
+    const hinted = await loginTo(`hint=${encodeURIComponent('Me@example.com')}`)
+    assert.equal(hinted.get('login_hint'), 'Me@example.com')
+    assert.equal(hinted.get('prompt'), null)
+    for (const junk of ['not-an-email', 'a b@example.com', '<x>@y.z', `${'a'.repeat(250)}@example.com`, '']) {
+      assert.equal((await loginTo(`hint=${encodeURIComponent(junk)}`)).get('login_hint'), null, junk)
+    }
+    const switched = await loginTo('switch=1&hint=me%40example.com')
+    assert.equal(switched.get('prompt'), 'select_account')
+    assert.equal(switched.get('login_hint'), null)
+    assert.equal((await loginTo('switch=yes')).get('prompt'), null)
+
+    // Bad state, missing cookie: 400 with a retry link back to where sign-in started.
+    const r = await begin('kanban.example.com', '/x?y=1')
+    const retry = await request(port, `/auth/callback?error=access_denied&state=${encodeURIComponent(r.params.get('state'))}`, {
+      host: 'kanban.example.com',
+      headers: { cookie: r.oauth }
+    })
+    assert.equal(retry.status, 400)
+    assert.match(retry.text, /href="\/auth\/login\?return=%2Fx%3Fy%3D1"/)
+    assert.match(retry.headers['content-security-policy'], /font-src https:\/\/fonts\.gstatic\.com/)
+    assert.doesNotMatch(retry.headers['content-security-policy'], /script-src/)
     const s = await begin('kanban.example.com', '/')
     token = claimsFor(s.params)
     const bad = await finish('kanban.example.com', s.params, s.oauth, 'wrong')
     assert.equal(bad.status, 400)
-    assert.match(bad.text, /Try again/)
+    assert.match(bad.text, /href="\/auth\/login">Try again/) // no cookie of ours: nothing to return to
     assert.equal((await request(port, `/auth/callback?code=abc&state=${s.params.get('state')}`)).status, 400)
 
     // Wrong nonce or audience: 400.
@@ -251,6 +274,7 @@ test('google sign-in: redirect, callback, allow list, state, server-side session
     assert.equal(no.status, 403)
     assert.match(no.text, /&lt;b&gt;x&lt;\/b&gt;@example.com/)
     assert.match(no.text, /Use a different Google account/)
+    assert.match(no.text, /href="\/auth\/login\?switch=1"/)
     assert.equal(cookieOf(no, '__Host-sid'), undefined)
     token = claimsFor(s.params, { email_verified: 'true' })
     assert.equal((await finish('kanban.example.com', s.params, s.oauth)).status, 403)
@@ -616,7 +640,8 @@ test('upkeep: stale queued raw jobs expire, sent ones wait, day-old finished job
     const poll = (body) => request(port, '/api/agent/poll', { method: 'POST', headers: { Authorization: 'Bearer tok' }, body: { printer: { ready: true }, ...body } })
     const { jobs } = (await poll()).json
     assert.deepEqual(jobs.find((j) => j.jobId === id['fresh-raw']), { jobId: id['fresh-raw'], raw: 'QUJD' })
-    assert.deepEqual(jobs.find((j) => j.jobId === id['stale-sent']), { jobId: id['stale-sent'], raw: 'U0VOVA==' })
+    // Past the hour a sent job goes out marked expired: the agent fails it unless it already printed it.
+    assert.deepEqual(jobs.find((j) => j.jobId === id['stale-sent']), { jobId: id['stale-sent'], raw: 'U0VOVA==', expired: true })
     await poll({ results: [{ jobId: id['stale-sent'], ok: true }] })
     assert.equal((await job(id['stale-sent'])).status, 'printed')
     // A label that did print after all replaces its expiry; a late failure does not.
@@ -869,6 +894,10 @@ test('lockout: cookieless or cancelled callbacks are not guesses; sign-in and ag
     }
     assert.equal((await poll('a'.repeat(32))).status, 200)
 
+    // What any web page can post cross-site without a preflight: no Authorization header.
+    for (let i = 0; i < 25; i += 1) assert.equal((await request(b.port, '/api/agent/poll', { method: 'POST', body: {} })).status, 401)
+    assert.equal((await poll('a'.repeat(32))).status, 200)
+
     // A real attempt whose code exchange fails does count, and only toward sign-in.
     const login = await request(b.port, '/auth/login')
     const oauth = cookieOf(login, 'oauth')
@@ -956,6 +985,41 @@ test('quota: parallel editor writes cannot overshoot 64 MB; at most 50 raw label
     const { jobs } = (await poll()).json
     await poll({ results: [{ jobId: jobs[0].jobId, ok: true }] })
     assert.equal((await print()).status, 202)
+  } finally {
+    server.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('streams: only the board itself may open one (Lax cookies also come from sibling subdomains)', async () => {
+  const { dir, env } = await openBoard()
+  const server = await start(env)
+  const port = await listen(server)
+  try {
+    assert.equal((await request(port, '/api/stream', { headers: { 'sec-fetch-site': 'same-site' } })).status, 403)
+    assert.equal((await request(port, '/api/stream', { headers: { 'sec-fetch-site': 'cross-site' } })).status, 403)
+  } finally {
+    server.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('task prints: one waiting label per task; a print racing its task deletion leaves nothing behind', async () => {
+  const state = apply(apply(emptyState(), { type: 'task.deleted', data: { id: 't1' }, ts: 1 }), {
+    type: 'print.requested', data: { jobId: 'j1', kind: 'task', taskId: 't1' }, ts: 2
+  })
+  assert.equal(state.jobs.size, 0)
+
+  const { dir, env } = await openBoard()
+  const server = await start(env)
+  const port = await listen(server)
+  try {
+    const task = await request(port, '/api/tasks', { method: 'POST', headers: H, body: { title: 'once' } })
+    const first = await request(port, `/api/tasks/${task.json.id}/print`, { method: 'POST', headers: H })
+    const again = await request(port, `/api/tasks/${task.json.id}/print`, { method: 'POST', headers: H })
+    assert.equal(first.status, 202)
+    assert.equal(again.status, 200)
+    assert.equal(again.json.id, first.json.id)
   } finally {
     server.close()
     await rm(dir, { recursive: true, force: true })

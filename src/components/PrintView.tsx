@@ -17,7 +17,7 @@ import type {
   SavedPrintFill,
   TemplateGroup
 } from '../lib/types'
-import { clamp } from '../lib/units'
+import { clamp, getBasePxPerMm } from '../lib/units'
 import Icon, { IconButton } from './Icon'
 import LabelCanvas from './LabelCanvas'
 import NumberField from './NumberField'
@@ -52,6 +52,32 @@ function whenSaved(updatedAt: number): string {
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : ''
 }
 
+const PREVIEW_ZOOM = 2
+const NARROW_QUERY = '(max-width: 820px)'
+
+/**
+ * The preview is drawn at 2x; on a phone that is wider than the screen, so it
+ * shrinks to the space left by the page, panel and canvas padding.
+ */
+function useFittedPreviewZoom(widthMm: number): number {
+  const measure = () => {
+    if (!window.matchMedia(NARROW_QUERY).matches) return PREVIEW_ZOOM
+    const available = window.innerWidth - 32 - 34 - 32 - 8
+    const fit = Math.floor((available / (widthMm * getBasePxPerMm())) * 20) / 20
+    return clamp(fit, 0.25, PREVIEW_ZOOM)
+  }
+  const [zoom, setZoom] = useState(measure)
+  useEffect(() => {
+    const update = () => setZoom(measure())
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+    // measure reads only widthMm and the window.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [widthMm])
+  return zoom
+}
+
 export default function PrintView({
   templates,
   groups,
@@ -76,6 +102,7 @@ export default function PrintView({
   onSaveFill,
   onDeleteFill
 }: PrintViewProps) {
+  const previewZoom = useFittedPreviewZoom(media.widthMm)
   const firstInput = useRef<HTMLInputElement | null>(null)
   const [attempted, setAttempted] = useState(false)
   const [dragId, setDragId] = useState<string | null>(null)
@@ -357,7 +384,7 @@ export default function PrintView({
             elements={elements}
             fieldValues={values}
             selectedId={null}
-            zoom={2}
+            zoom={previewZoom}
             mode="select"
             bitmaps={bitmaps}
             readOnly

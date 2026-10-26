@@ -317,6 +317,12 @@ def process_jobs(jobs, ready, state, cfg, send_fn=send):
             state.queue(state.done[jid])
             results.append(state.done[jid])
             continue
+        if job.get('expired') is True:  # never printed and over an hour old: fail it, don't print it late
+            r = {'jobId': jid, 'ok': False, 'error': 'Expired before the printer was ready'}
+            log('job %s expired' % jid)
+            _finish(state, r)
+            results.append(r)
+            continue
         if not ready:
             continue
         try:
@@ -592,6 +598,12 @@ def _self_test_jobs(cfg):
     assert process_jobs([{'jobId': 'a', 'task': {}}], True, st, cfg, ok) == r1 and len(sent) == 1
     st.ack(1)
     assert State(path).pending == [] and 'a' in State(path).done
+    # an expired job is failed, never printed late, even while the printer is not ready;
+    # one that already printed keeps its stored result
+    rx = process_jobs([{'jobId': 'x', 'raw': 'QUJD', 'expired': True}], False, st, cfg, ok)
+    assert rx[0]['ok'] is False and 'Expired' in rx[0]['error'] and len(sent) == 1
+    assert process_jobs([{'jobId': 'a', 'task': {}, 'expired': True}], True, st, cfg, ok)[0]['ok'] is True
+    st.ack(len(st.pending))
     # crash mid-write: reported failed on restart, never reprinted
 
     def crash(t, d):

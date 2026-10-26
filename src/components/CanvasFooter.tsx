@@ -9,6 +9,8 @@ interface CanvasFooterProps {
   zoom: number
   mode: CanvasMode
   converting: boolean
+  /** Lower zoom bound; phones go below 1 so a wide label fits the screen. */
+  minZoom?: number
   onZoomChange: (zoom: number) => void
 }
 
@@ -20,11 +22,12 @@ export default function CanvasFooter({
   zoom,
   mode,
   converting,
+  minZoom = MIN_ZOOM,
   onZoomChange
 }: CanvasFooterProps) {
   const continuous = isContinuous(media)
   const step = (delta: number) =>
-    onZoomChange(Number(clamp(zoom + delta, MIN_ZOOM, MAX_ZOOM).toFixed(1)))
+    onZoomChange(Number(clamp(zoom + delta, minZoom, MAX_ZOOM).toFixed(1)))
 
   return (
     <footer className="canvas-footer">
@@ -58,7 +61,7 @@ export default function CanvasFooter({
         <IconButton name="minus" label="Zoom out" className="mini-button" onClick={() => step(-0.5)} />
         <input
           type="range"
-          min={MIN_ZOOM}
+          min={minZoom}
           max={MAX_ZOOM}
           step={0.5}
           value={zoom}

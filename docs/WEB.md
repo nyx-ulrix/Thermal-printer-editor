@@ -41,9 +41,14 @@ without `Secure`. When a request carries several cookies of one name, any one th
 
 - `GET /auth/login?return=/path` sets cookie `oauth` (signed: state, PKCE verifier, nonce, return path;
   `HttpOnly; Secure; SameSite=Lax; Max-Age=600`) and redirects (302) to Google's authorize
-  endpoint with `response_type=code`, `scope=openid email`, `prompt=select_account`, S256 PKCE, `state`,
+  endpoint with `response_type=code`, `scope=openid email`, S256 PKCE, `state`,
   `nonce`, `redirect_uri=<this site's origin>/auth/callback`. `return` must be a same-site path starting
   with a single `/`, printable ASCII only (`\x21`-`\x7e`, no backslash); anything else becomes `/`.
+  No account chooser by default: `prompt=select_account` is sent only with `?switch=1` (the 403 page's
+  "Use a different Google account"). Otherwise an optional `?hint=<email>` (at most 254 chars, no spaces,
+  quotes, `<>` or backslash, `x@y.z` shape; anything else is ignored) is forwarded as `login_hint`. Session
+  cookies are per host, so the board's "Label editor" link goes to
+  `<editorUrl>/auth/login?hint=<signed-in email>` and Google signs straight in to the same account.
 - `GET /auth/callback` checks `state` against the cookie, exchanges the code at Google's token endpoint
   (client secret + verifier), reads the `id_token` from that direct TLS response and checks `iss`
   (`https://accounts.google.com` or `accounts.google.com`), `aud` = client id, `exp`, `nonce`,
@@ -53,7 +58,11 @@ without `Secure`. When a request carries several cookies of one name, any one th
   (cancelled sign-in) do not. On success: a server-side session and cookie
   `sid` = a random 256-bit id (base64url; `HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800`), clears
   `oauth`, 302 to the return path. Not allowed: 403 HTML page naming the account and offering "Use a different Google account"
-  (`/auth/login`). Any other failure: 400 HTML page with a "Try again" link.
+  (`/auth/login?switch=1`, plus `return`). Any other failure: 400 HTML page with a "Try again" link
+  (`/auth/login?return=<path>` when the `oauth` cookie said where sign-in started, else `/auth/login`);
+  429 when locked out. These pages use the board's look (cream paper, ink, Space Mono, square outlined
+  link), have no scripts, and their CSP allows only inline styles, `fonts.googleapis.com` styles and
+  `fonts.gstatic.com` fonts.
 - Sessions: 7 days, sliding: a request with less than half the life left extends it to 7 days and re-sends
   the cookie. The renew only updates an existing row (never inserts) and is skipped if the session was
   logged out meanwhile; writes to one session run in order, so a logout racing a renew always wins. Stored as `sha256(id) -> {email, exp}` in memory and in table `kanban_sessions` (or files

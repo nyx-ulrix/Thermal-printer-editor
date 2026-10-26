@@ -125,7 +125,8 @@ fieldset.field legend{margin-bottom:6px;padding:0}
 .knob .num small{font-size:.55em;margin-left:1px}
 .knob .sub{font-size:11px;color:var(--grey);min-height:1.4em;overflow-wrap:anywhere}
 .stamp{position:absolute;z-index:2;left:50%;top:calc(clamp(56px,5vw,76px) / 2);transform:translate(-50%,-50%) rotate(-7deg);padding:6px 14px 4px;border:4px solid var(--red);color:var(--red);
-  font:700 clamp(28px,4vw,46px)/1 var(--mono);letter-spacing:.06em;white-space:nowrap;mix-blend-mode:multiply;filter:url(#ink-soft);pointer-events:none;background:rgba(244,239,230,.35)}
+  font:700 clamp(28px,4vw,46px)/1 var(--mono);letter-spacing:.06em;white-space:nowrap;mix-blend-mode:normal;filter:url(#ink-soft);pointer-events:none;background:rgba(244,239,230,.35)}
+/* normal, not multiply: red multiplied over the black knob discs vanished */
 .no-agent .knob svg{opacity:.85}
 .no-agent .bars{opacity:.38}
 .side{display:grid;gap:12px;align-content:start;min-width:0}
@@ -141,9 +142,11 @@ fieldset.field legend{margin-bottom:6px;padding:0}
 .server{font-size:12px;color:var(--grey);letter-spacing:.06em;text-transform:uppercase;overflow-wrap:anywhere}
 
 /* ---------- printer note ---------- */
-.note{display:flex;gap:14px;align-items:center;margin:18px 0 0;padding:12px 14px;border:2px solid var(--ink);
-  background:radial-gradient(circle,rgba(241,80,96,.45) 0 1.2px,transparent 1.5px) 0 0/5px 5px,var(--sheet)}
-.note svg{flex:none;width:34px;height:34px}
+/* halftone only on the icon strip; the text sits on plain sheet */
+.note{display:flex;gap:16px;align-items:center;margin:18px 0 0;padding:12px 14px 12px 0;border:2px solid var(--ink);
+  background:linear-gradient(var(--ink),var(--ink)) 60px 0/2px 100% no-repeat,linear-gradient(var(--sheet),var(--sheet)) 62px 0/100% 100% no-repeat,
+    radial-gradient(circle,rgba(241,80,96,.45) 0 1.2px,transparent 1.5px) 0 0/5px 5px,var(--sheet)}
+.note svg{flex:none;width:34px;height:34px;margin:0 13px}
 .note p{max-width:none}
 
 /* ---------- board ---------- */
@@ -184,8 +187,10 @@ fieldset.field legend{margin-bottom:6px;padding:0}
 .chip.failed{background:var(--red)}
 .job-err{flex-basis:100%;font-size:12px;font-weight:700;color:#a3122a;overflow-wrap:anywhere}
 .actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding-top:10px;border-top:2px solid var(--ink)}
-.actions .more{display:flex;gap:14px;margin-left:auto}
-.actions .link{padding:8px 2px;letter-spacing:.1em}
+/* tight enough that Print, both arrows and Edit/Delete share one row in a 1440 board column */
+.actions .more{display:flex;gap:8px;margin-left:auto}
+.actions .btn.solid{padding-inline:8px}
+.actions .link{padding:8px 1px;letter-spacing:.06em}
 .btn.mv{min-width:40px;padding:2px 8px;font-size:18px;letter-spacing:0;line-height:1}
 .actions .ask{font-size:12px;font-weight:700;flex-basis:100%}
 .grip{display:none}
@@ -493,7 +498,13 @@ function setMe(me) {
   let editor = null
   try {
     const u = new URL(me?.editorUrl, location.href)
-    if (u.protocol === 'https:' || u.protocol === 'http:') editor = u.href
+    // Sign-in cookies are per host: go through the editor's sign-in with this account as the hint,
+    // so Google signs straight in instead of showing its account chooser.
+    if (u.protocol === 'https:' || u.protocol === 'http:') {
+      const login = new URL('/auth/login', u)
+      if (email) login.searchParams.set('hint', email)
+      editor = login.href
+    }
   } catch {}
   const link = $('#editor-link')
   link.hidden = !editor

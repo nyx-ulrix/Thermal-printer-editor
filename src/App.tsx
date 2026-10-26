@@ -76,7 +76,7 @@ import type {
   TextAlign,
   VerticalAlign
 } from './lib/types'
-import { applyDpi, clamp, formatMm, getDotsPerMm, roundMm } from './lib/units'
+import { applyDpi, clamp, formatMm, getBasePxPerMm, getDotsPerMm, roundMm } from './lib/units'
 
 /** Three dots at 203 DPI, thin enough to look like a rule rather than a bar. */
 const DEFAULT_LINE_THICKNESS_MM = 0.375
@@ -147,6 +147,9 @@ function normalizeElement(element: LabelElement): LabelElement {
   return normalizeLabelElement(element)
 }
 
+const NARROW_QUERY = '(max-width: 820px)'
+const NARROW_MIN_ZOOM = 0.25
+
 export default function App() {
   const [view, setView] = useState<AppView>('home')
   const [settings, setSettings] = useState(() => {
@@ -191,6 +194,27 @@ export default function App() {
   const [saveNameDraft, setSaveNameDraft] = useState('')
   const [lastPrintedAt, setLastPrintedAt] = useState<number | null>(null)
   const [status, setStatus] = useState<Status>({ kind: 'idle', message: '' })
+
+  // Phones: the one-column layout gives the canvas the viewport's width, so the
+  // preview zooms out (below the desktop minimum if needed) until the label fits.
+  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW_QUERY).matches)
+  useEffect(() => {
+    const query = window.matchMedia(NARROW_QUERY)
+    const update = () => setNarrow(query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+  useEffect(() => {
+    if (!narrow) {
+      setZoom((current) => Math.max(current, 1))
+      return
+    }
+    if (view !== 'design') return
+    // Canvas padding (2 x 16px), the vertical ruler and a little air.
+    const available = window.innerWidth - 32 - 22 - 8
+    const fit = Math.floor((available / (media.widthMm * getBasePxPerMm())) * 20) / 20
+    setZoom((current) => clamp(Math.min(current, fit), NARROW_MIN_ZOOM, current))
+  }, [narrow, view, media.widthMm])
 
   const bridgeAvailable = typeof window.printer !== 'undefined'
   useCustomFonts(elements, fontLibrary)
@@ -1142,6 +1166,7 @@ export default function App() {
               zoom={zoom}
               mode={mode}
               converting={converting}
+              minZoom={narrow ? NARROW_MIN_ZOOM : undefined}
               onZoomChange={setZoom}
             />
           </main>

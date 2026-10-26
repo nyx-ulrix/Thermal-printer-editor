@@ -69,6 +69,8 @@ export function apply(state, { type, data, ts }) {
       // Old events have no kind: they are task jobs. Raw payloads never go into a job object.
       // `requested` never changes; `ts` follows the latest status change. A repeated jobId changes nothing.
       if (state.jobs.has(data.jobId)) break
+      // A print that raced its task's deletion would never be handed out or pruned.
+      if (data.kind !== 'raw' && !state.tasks.has(data.taskId)) break
       if (data.kind === 'raw') {
         state.jobs.set(data.jobId, { id: data.jobId, kind: 'raw', description: data.description ?? '', status: 'queued', error: null, requested: ts, ts })
         // Logs written before payloads moved to their own store still carry the bytes.
@@ -552,18 +554,42 @@ export function jwtPayload(token) {
 const escapeHtml = (value) =>
   String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 
+// Error pages share the board's paper, ink and type. No scripts; the only outside requests are Space Mono.
 function sendPage(res, status, title, message, link, label) {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 16px;color:#1a1a1a;background:#fafafa}
-a{color:#0b57d0}@media(prefers-color-scheme:dark){body{color:#eee;background:#141414}a{color:#8ab4f8}}</style></head>
-<body><h1>${escapeHtml(title)}</h1><p>${message}</p><p><a href="${escapeHtml(link)}">${escapeHtml(label)}</a></p></body></html>`
+<title>${escapeHtml(title)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap">
+<style>html,body{background:#F4EFE6}body{margin:0;color:#1d1d1b;font:400 14px/1.55 "Space Mono",ui-monospace,Menlo,Consolas,monospace}
+main{max-width:34rem;margin:0 auto;padding:clamp(48px,14vh,140px) 16px 48px}
+h1{margin:0 0 18px;padding-bottom:12px;border-bottom:6px solid #1d1d1b;font-size:clamp(26px,5vw,40px);line-height:1;letter-spacing:-.03em;text-transform:uppercase;overflow-wrap:anywhere}
+p{margin:0 0 22px;overflow-wrap:anywhere}
+a{display:inline-flex;align-items:center;min-height:42px;padding:6px 14px;border:2px solid #1d1d1b;border-radius:0;color:#1d1d1b;text-decoration:none;font-weight:700;font-size:12px;line-height:1.2;letter-spacing:.08em;text-transform:uppercase}
+a:hover{background:#1d1d1b;color:#F4EFE6}a:focus-visible{outline:3px solid #0078BF;outline-offset:3px}</style></head>
+<body><main><h1>${escapeHtml(title)}</h1><p>${message}</p><p><a href="${escapeHtml(link)}">${escapeHtml(label)}</a></p></main></body></html>`
   res
     .writeHead(status, {
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'no-store',
-      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+      'Content-Security-Policy':
+        "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     })
     .end(html)
+}
+
+/** `/auth/login` with a sanitized return path (omitted when it is just '/') and any extra params. */
+const loginPath = (back, extra = {}) => {
+  const params = new URLSearchParams(extra)
+  const path = safeReturn(back)
+  if (path !== '/') params.set('return', path)
+  const qs = params.toString()
+  return qs ? `/auth/login?${qs}` : '/auth/login'
+}
+
+/** A plausible email for Google's `login_hint`, or '' (only a hint: Google still asks the user). */
+export function loginHint(value) {
+  if (typeof value !== 'string' || value.length > 254) return ''
+  return /^[^\s@<>"'\\]+@[^\s@<>"'\\]+\.[^\s@<>"'\\]+$/.test(value) ? value : ''
 }
 
 const SECURITY_HEADERS = {
@@ -875,10 +901,12 @@ export async function start(env = process.env, hooks = {}) {
 
   /** Raw labels still queued after an hour fail instead of printing long after anyone wanted them;
    * finished jobs older than a day leave memory. Task jobs never expire: the task is still on the board.
-   * A sent job is in the agent's hands and waits for its result (resent while due; the agent dedupes by jobId). */
+   * A sent job is in the agent's hands: past the hour it is resent marked `expired` so the agent fails it
+   * unless it already printed it, and after a further day it expires here (a late ok still replaces that). */
   async function upkeep(now = Date.now()) {
     for (const job of [...state.jobs.values()]) {
-      if (job.kind === 'raw' && job.status === 'queued' && now - job.requested > EXPIRE_RAW_MS) {
+      const age = now - job.requested
+      if (job.kind === 'raw' && ((job.status === 'queued' && age > EXPIRE_RAW_MS) || (job.status === 'sent' && age > EXPIRE_RAW_MS + DAY_MS))) {
         await finish({ jobId: job.id, ok: false, error: EXPIRED })
       }
     }
@@ -915,7 +943,9 @@ export async function start(env = process.env, hooks = {}) {
           // ponytail: at most ~4 MB of raw labels per reply; the rest go out on the next polls
           if (rawBytes && rawBytes + raw.length > 4 * 1024 * 1024) continue
           rawBytes += raw.length
-          jobs.push({ jobId: job.id, raw })
+          // A sent job the agent keeps failing to send (nothing went out) must not print hours later:
+          // past the hour the agent answers it failed instead of printing, unless it already printed it.
+          jobs.push({ jobId: job.id, raw, ...(now - job.requested > EXPIRE_RAW_MS && { expired: true }) })
         } else {
           const task = state.tasks.get(job.taskId)
           if (!task) continue
@@ -986,12 +1016,18 @@ export async function start(env = process.env, hooks = {}) {
       redirect_uri: `${site.origin}/auth/callback`,
       response_type: 'code',
       scope: 'openid email',
-      prompt: 'select_account',
       state: stateParam,
       nonce,
       code_challenge: challenge,
       code_challenge_method: 'S256'
     })
+    // The account chooser only on request ("Use a different Google account"); otherwise Google signs in
+    // the current account, steered by the hint the other site passes along.
+    if (query.get('switch') === '1') params.set('prompt', 'select_account')
+    else {
+      const hint = loginHint(query.get('hint'))
+      if (hint) params.set('login_hint', hint)
+    }
     res
       .writeHead(302, {
         Location: `${GOOGLE_AUTH_URL}?${params}`,
@@ -1007,20 +1043,22 @@ export async function start(env = process.env, hooks = {}) {
     const clearOauth = setCookie(site, 'oauth', '', oauthPath(site), 0)
     // Only a failed code exchange or bad claims count toward the lockout: a callback without our cookie
     // or state (any page can load the URL) or a Google error (a cancelled sign-in) is not a guess.
-    const fail = (why, counts = true) => {
-      if (counts) signInFailures.fail(ip)
-      // Quoted: parts of `why` come from the request or from Google.
-      if (why) console.warn(`Sign-in failed: ${JSON.stringify(why)}`)
-      res.setHeader('Set-Cookie', clearOauth)
-      sendPage(res, 400, 'Sign-in failed', 'Google sign-in did not complete. It may have been cancelled or taken too long.', '/auth/login', 'Try again')
-    }
-    if (signInFailures.limited(ip)) return sendPage(res, 429, 'Too many attempts', 'Too many failed sign-ins. Wait 15 minutes, then try again.', '/auth/login', 'Try again')
-
     const code = query.get('code')
     const returned = query.get('state') ?? ''
     const pending = cookieValues(req, cookieName(site, 'oauth'))
       .map((value) => cookies.verify(value))
       .find((p) => p && typeof p.state === 'string' && sameSecret(returned, p.state))
+    // "Try again" goes back to the same page the sign-in started from.
+    const again = loginPath(pending?.back)
+    const fail = (why, counts = true) => {
+      if (counts) signInFailures.fail(ip)
+      // Quoted: parts of `why` come from the request or from Google.
+      if (why) console.warn(`Sign-in failed: ${JSON.stringify(why)}`)
+      res.setHeader('Set-Cookie', clearOauth)
+      sendPage(res, 400, 'Sign-in failed', 'Google sign-in did not complete. It may have been cancelled or taken too long.', again, 'Try again')
+    }
+    if (signInFailures.limited(ip)) return sendPage(res, 429, 'Too many attempts', 'Too many failed sign-ins. Wait 15 minutes, then try again.', again, 'Try again')
+
     if (!pending) return fail('bad state', false)
     if (!code) return fail(query.get('error') && `Google said ${str(query.get('error'), 64)}`, false)
 
@@ -1065,7 +1103,7 @@ export async function start(env = process.env, hooks = {}) {
         403,
         'Not allowed',
         `The Google account <strong>${escapeHtml(email)}</strong> is not allowed here.`,
-        `/auth/login?return=${encodeURIComponent(pending.back)}`,
+        loginPath(pending.back, { switch: '1' }),
         'Use a different Google account'
       )
     }
@@ -1228,10 +1266,13 @@ export async function start(env = process.env, hooks = {}) {
     if (pathname === '/api/agent/poll' && method === 'POST') {
       if (!agentToken) throw new HttpError(503, 'AGENT_TOKEN is not set on the server')
       const ip = clientIp(req)
-      // ponytail: keyed by client IP (own counter, not sign-in's); behind a proxy without cf-connecting-ip, guessers share the agent's bucket
-      if (agentFailures.limited(ip)) throw new HttpError(429, 'Too many failed attempts; wait 15 minutes')
       const header = req.headers.authorization ?? ''
-      if (!header.startsWith('Bearer ') || !sameSecret(header.slice(7), agentToken)) {
+      // A page in the user's browser can post here header-less (no preflight) from the agent's own
+      // IP; that is not a guess, so it never counts. Pages cannot add Authorization cross-site.
+      if (!header.startsWith('Bearer ')) throw new HttpError(401, 'Bad agent token')
+      // ponytail: keyed by client IP (own counter, not sign-in's)
+      if (agentFailures.limited(ip)) throw new HttpError(429, 'Too many failed attempts; wait 15 minutes')
+      if (!sameSecret(header.slice(7), agentToken)) {
         agentFailures.fail(ip)
         throw new HttpError(401, 'Bad agent token')
       }
@@ -1268,7 +1309,12 @@ export async function start(env = process.env, hooks = {}) {
     if (!email) throw new HttpError(401, 'Sign in first')
 
     if (pathname === '/api/me' && method === 'GET') return sendJson(res, 200, { email, kanbanUrl: kanbanOrigin, editorUrl: editorOrigin })
-    if (pathname === '/api/stream' && method === 'GET') return stream(req, res, email)
+    if (pathname === '/api/stream' && method === 'GET') {
+      // Lax cookies reach here from sibling subdomains; only the board itself may hold streams.
+      const fetchSite = req.headers['sec-fetch-site']
+      if (fetchSite && fetchSite !== 'same-origin') throw new HttpError(403, 'Open the board on its own site')
+      return stream(req, res, email)
+    }
     if (pathname === '/api/printer' && method === 'GET') return sendJson(res, 200, printerStatus())
 
     // ---- editor storage ----
@@ -1348,6 +1394,9 @@ export async function start(env = process.env, hooks = {}) {
       const [, id, print] = match
       if (!state.tasks.has(id)) throw new HttpError(404, 'No such task')
       if (print && method === 'POST') {
+        // One waiting label per task: pressing Print again while it waits returns that job.
+        const waiting = [...state.jobs.values()].find((j) => j.taskId === id && j.status === 'queued')
+        if (waiting) return sendJson(res, 200, waiting)
         const jobId = randomUUID()
         await broker.publish('print', 'print.requested', { jobId, kind: 'task', taskId: id })
         return sendJson(res, 202, state.jobs.get(jobId))
