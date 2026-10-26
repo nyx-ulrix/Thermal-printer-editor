@@ -10,6 +10,8 @@
     "build": "tsc --noEmit -p tsconfig.json && electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build:web": "tsc --noEmit -p tsconfig.json && vite build --config vite.web.config.ts",
+    "start:web": "node kanban/server.mjs",
     "icon": "node scripts/make-icon.mjs",
     "package": "npm run build && electron-builder --win --dir --publish never",
     "dist": "npm run build && electron-builder --win --publish never"

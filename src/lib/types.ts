@@ -215,6 +215,8 @@ export interface PrinterInfo {
 export interface PrintResult {
   ok: boolean
   error?: string
+  /** Web build only: the job is queued but not yet confirmed, so printing again would duplicate it. */
+  queued?: boolean
 }
 
 export interface PrinterBridge {

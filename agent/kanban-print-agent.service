@@ -10,6 +10,10 @@ EnvironmentFile=/etc/kanban-print-agent.env
 ExecStart=/usr/bin/python3 -I /opt/kanban-print-agent/printer_agent.py
 Restart=always
 RestartSec=5
+# Job state (finished ids, unsent acks) lives in /var/lib/kanban-print-agent so a restart
+# never reprints a label; passed to the agent as $STATE_DIRECTORY.
+StateDirectory=kanban-print-agent
+StateDirectoryMode=0700
 
 # Hardening. /dev, /proc and /sys stay reachable (no PrivateDevices) so the agent can
 # write /dev/usb/lp0 (via group lp) and read /proc stats and /sys/class/thermal.
@@ -21,6 +25,18 @@ ProtectKernelTunables=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+UMask=077
 
 [Install]
 WantedBy=multi-user.target

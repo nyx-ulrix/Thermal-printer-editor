@@ -22,8 +22,9 @@ if [ "${1:-}" = "--uninstall" ]; then
   rm -rf "$DEST"
   systemctl daemon-reload
   echo "Uninstalled $NAME."
-  echo "Kept $ENV_FILE (it holds your token) and user $AGENT_USER. To remove them too:"
-  echo "  sudo rm $ENV_FILE && sudo userdel $AGENT_USER"
+  echo "Kept $ENV_FILE (it holds your token), job state in /var/lib/$NAME and user $AGENT_USER."
+  echo "To remove them too:"
+  echo "  sudo rm -r $ENV_FILE /var/lib/$NAME && sudo userdel $AGENT_USER"
   exit 0
 fi
 
@@ -46,6 +47,9 @@ if [ ! -e "$ENV_FILE" ]; then
   install -m 600 -o 0 -g 0 "$SRC/agent.env.example" "$ENV_FILE"
   echo "Created $ENV_FILE"
 fi
+# The token lives here: keep it root-only even if the file was created by hand.
+chown 0:0 "$ENV_FILE"
+chmod 600 "$ENV_FILE"
 
 sed "s|/usr/bin/python3|$PY|" "$SRC/$NAME.service" > "$UNIT"
 chmod 644 "$UNIT"

@@ -744,7 +744,9 @@ export default function App() {
       setStatus(
         result.ok
           ? { kind: 'ok', message: `${description} sent to ${printerName}.` }
-          : { kind: 'error', message: result.error ?? 'Printing failed.' }
+          : result.queued
+            ? { kind: 'busy', message: result.error ?? 'Queued.' }
+            : { kind: 'error', message: result.error ?? 'Printing failed.' }
       )
       return result.ok
     },
