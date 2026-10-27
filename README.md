@@ -96,12 +96,14 @@ https://printer-editor.liewjiaen.com is the same React app as the desktop editor
 
 https://kanban.liewjiaen.com is a three-column board (**To do**, **Doing**, **Done**) whose cards can be printed as labels.
 
-- **Cards** have a title (up to 140 characters), optional notes (up to 1000), an urgency (low, medium or high) and an optional due date. Add them with the New task form; edit or delete them on the card (delete asks to confirm).
+- **Cards** have a title (up to 140 characters), optional notes (up to 1000), an urgency (low, medium or high) and an optional due date and time. Add them with the New task form; edit or delete them on the card (delete asks to confirm).
 - **Colours:** a band across the top of each card shows its urgency (low teal, medium yellow, high red) and its due date: "Due today", "Due tomorrow", the date, or **OVERDUE** once it has passed (not in Done). The card itself takes its column's colour: To do pale red, Doing pale yellow, Done pale blue.
 - **Moving cards:** drag them to another column or use the arrow buttons. On a phone, hold a card for a moment (or press its dotted handle) to pick it up; the page scrolls when your finger nears the top or bottom edge.
 - **Order:** within a column, cards sort by due date (soonest first, no date last), then by urgency (high first).
 - **Folding columns:** tap a column's name to fold it away; Done starts folded. Each browser remembers your choice.
-- **Due dates** are picked from a calendar in the board's own style, usable by keyboard (arrows move by day and week, Page Up/Down by month, Enter picks, Escape closes).
+- **Due dates** are picked from a calendar in the board's own style, usable by keyboard (arrows move by day and week, Page Up/Down by month, Enter picks, Escape closes). The optional **due time** is typed beside it: `15:00`, `1500`, `9:30`, `3pm` and `3:30 pm` all work. A task with a time is overdue once that time passes.
+- **Google Calendar sync** (Settings → Google Calendar → Connect): every open task with a due date becomes an event in a calendar called *Kanban* that the app creates in your Google account. It is all-day, or 30 minutes at the due time, coloured by urgency. Editing, moving or deleting the task updates the event within seconds; marking it done or clearing its date removes the event. The sync is one way (changes made in Google Calendar are not read back) and only ever touches events it made itself. *Sync now* and *Disconnect* are in Settings.
+- **Install as an app:** in Chrome, use the install icon in the address bar (or Settings → Install app). The board and the label editor install separately, each with its own icon. The board's icon is a riso-printed to-do checkbox.
 - **Print** on a card queues a label for it. One label per task waits at a time: pressing Print again while one is queued returns the same job instead of queuing another.
 - **Live updates:** every open board sees changes instantly over Server-Sent Events; the board reconnects by itself after a drop.
 - **Printer dot:** next to LIVE in the header, PRINTER has a teal dot when the printer is ready and a red one when it is down. Clicking it opens the details. Print buttons read *Queue print* while it is down; the label waits and prints when the printer is back.
@@ -154,7 +156,8 @@ Expiry rules:
 
 - **Event log.** Every change is an event (`task.created`, `task.updated`, `task.deleted`, `print.requested`, `print.sent`, `print.finished`) with a unique id. The broker appends it to the log first, then applies it to in-memory state, then fans it out to subscribers, one event at a time, so log order is apply order. If the append fails, the request fails and nothing changes. Board state is the fold of the log, replayed on boot (duplicate ids are skipped; a torn last line in the file log is cut off).
 - **Topics.** `tasks` and `print` are persisted. `printer` and `resources` (agent reports) are ephemeral.
-- **Storage.** Deployed, everything lives in the Deployer project's MariaDB through Deployer's data API: `kanban_events` (the log), `editor_kv` (editor settings and templates), `kanban_sessions` and `print_payloads`. Locally it is files under `kanban/data/` (`events.jsonl`, `editor/`, `sessions/`, `payloads/`; directories `0700`, files `0600`).
+- **Storage.** Deployed, everything lives in the Deployer project's MariaDB through Deployer's data API: `kanban_events` (the log), `editor_kv` (editor settings and templates), `kanban_sessions`, `print_payloads` and `kanban_calendar` (the Google Calendar link; its refresh token is encrypted with a key derived from `SESSION_SECRET`). Locally it is files under `kanban/data/` (`events.jsonl`, `editor/`, `sessions/`, `payloads/`, `calendar/`; directories `0700`, files `0600`).
+- **Calendar sync** (`kanban/calendar.mjs`) follows the `tasks` topic: each change queues the task, and changes in quick succession go out as one request. Event ids are `kb` + the task's UUID, so a re-added date reuses its event. Every 6 hours, on boot and on *Sync now* it reconciles: it removes its own events whose task is gone, done or undated. Failures retry with backoff up to 5 minutes; a revoked Google grant stops the sync until you connect again.
 - **One instance.** The broker is in-process, so the server runs as a single instance.
 
 ## Security
@@ -213,7 +216,8 @@ SERVER_URL=http://localhost:4173 AGENT_TOKEN=dev-token PRINTER=/tmp/label.prn ST
 | `DEPLOYER_SOURCE_ID` | no | Picks the SQL data source; by default the project's first SQL source is used. It must be MariaDB. |
 | `DATA_DIR` | no | File storage root when not on Deployer. Default `kanban/data/`. |
 | `WEB_DIST` | no | Built web editor directory. Default `web-dist/`. |
-| `ALLOW_OPEN_BOARD=1` | no | Local development only: no sign-in. |
+| `ALLOW_OPEN_BOARD=1` | no | Local development only: no sign-in (and no calendar sync). |
+| `GOOGLE_TOKEN_URL`, `GOOGLE_CALENDAR_URL` | no | Local testing only: stand-ins for Google's token endpoint and Calendar API. Refused with https origins or `NODE_ENV=production`. |
 
 The server refuses to start without the Google settings, `ALLOWED_EMAILS` and `SESSION_SECRET` (unless `ALLOW_OPEN_BOARD=1`), so a misconfigured deploy never comes up unprotected.
 
@@ -243,6 +247,13 @@ deployer google-oauth thermal-kanban/thermal-kanban    # Google client: shows th
 ```
 
 Health check: `GET /healthz` → 200 on either host.
+
+**Google Calendar sync** needs two one-time settings in [Google Cloud Console](https://console.cloud.google.com/), on the project that holds the sign-in client:
+
+1. *APIs & Services → Library*: enable **Google Calendar API**.
+2. *Google Auth Platform → Data access → Add or remove scopes*: add `https://www.googleapis.com/auth/calendar.app.created` (lets the app create its own calendar and manage events in it, nothing else). Save.
+
+Then connect from the board: Settings → Google Calendar → Connect. Google may show a "Google hasn't verified this app" screen, because the app is unverified; choose *Advanced → Go to …* to continue. No new environment variables are needed: the existing Google client and redirect URI are reused.
 
 ## Print agent
 
@@ -294,10 +305,14 @@ All routes answer on both hosts. Every `/api/*` route except the agent's needs a
 | `POST /auth/logout` | End the session |
 | `GET /api/me` | `{email, kanbanUrl, editorUrl}` or 401 |
 | `GET /api/stream` | Server-Sent Events: a snapshot, then every event |
-| `POST /api/tasks` | Create a task `{title, notes?, column?, urgency?, due?}`; urgency `low`, `medium` (default) or `high`, due `YYYY-MM-DD` or empty |
+| `POST /api/tasks` | Create a task `{title, notes?, column?, urgency?, due?, dueTime?, dueTz?}`; urgency `low`, `medium` (default) or `high`, due `YYYY-MM-DD` or empty, dueTime `HH:MM` (needs a due date), dueTz an IANA zone |
 | `PATCH /api/tasks/:id` | Change a task (any of title, notes, column, urgency, due, order) |
 | `DELETE /api/tasks/:id` | Delete a task |
 | `POST /api/tasks/:id/print` | Queue a label for the task |
+| `GET /auth/calendar` | Connect Google Calendar (board host, signed in): Google consent, then back to `/?calendar=connected` |
+| `GET /api/calendar` | Sync status `{available, connected, email, calendarId, lastSync, error, pending}` |
+| `POST /api/calendar/sync`, `POST /api/calendar/disconnect` | Sync now; disconnect (revokes Google access) |
+| `GET /manifest.webmanifest`, `/sw.js`, `/icons/<name>.png` | Install files, served without sign-in on both hosts |
 | `GET /api/printer` | Printer state `{state: "ready" or "inactive", reason, target, agent}` |
 | `POST /api/editor/print` | Queue a raw label `{payload: base64 TSPL, description, jobId?}` |
 | `GET /api/jobs/:id` | One job's status |

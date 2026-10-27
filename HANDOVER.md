@@ -6,16 +6,17 @@ Last updated 2026-10-26 (tooling moved to the Linux machine that also hosts Depl
 
 | Part | Where | State |
 |---|---|---|
-| Pub/sub server | `kanban/server.mjs`, tests in `kanban/server.test.mjs` | Done, incl. Google sign-in, editor site, editor storage and raw prints (`docs/WEB.md`). `cd kanban && npm test` passes (12 tests). Node 20+, no dependencies. |
+| Pub/sub server | `kanban/server.mjs`, tests in `kanban/server.test.mjs` | Done, incl. Google sign-in, editor site, editor storage, raw prints, due dates and times, install files (`docs/WEB.md`). `cd kanban && npm test` passes (30 tests). Node 20+, no dependencies. |
+| Google Calendar sync | `kanban/calendar.mjs` | Done and tested against stand-in Google servers; not yet connected for real (needs the Cloud Console steps below). One way, board to a "Kanban" calendar the app creates. |
 | Editor web build | `src/web/`, `vite.web.config.ts`, `npm run build:web` / `npm run start:web` | Done. Electron build unchanged. |
-| Web UI | `kanban/public/index.html` (one file, inline CSS/JS) | Done. Interaction-checked in a browser at 1440 px and 375 px touch (drag, keyboard moves, edit, delete confirm, print, sign-in/out); four UI audit rounds. |
+| Web UI | `kanban/public/index.html` (one file, inline CSS/JS), `manifest.webmanifest`, `sw.js`, `icons/` | Done: urgency bands, due date and time, column colours, foldable columns sorted by due date then urgency, Settings (account, Google Calendar, printer and resources), touch drag, installable (riso to-do icon). Checked in a browser at 1440 px and 375 px touch. |
 | Linux print agent | `agent/` (`printer_agent.py`, `install.sh`, systemd unit, env example, README) | Done: task and raw jobs, persisted state (`/var/lib/kanban-print-agent`) so restarts never reprint, transient printer errors retried. `python3 -I agent/printer_agent.py --self-test` passes. Not yet run against a real printer. |
 | End-to-end | server + agent + a file standing in for `/dev/usb/lp0` | Passed for task labels and raw editor prints (bytes unchanged). A title containing `"\r\nPRINT 9,9` stayed inside one TEXT string. |
 | Audits | `docs/audits/2026-10-26-round-{1..4}.md` | Four rounds (security, correctness, UI). Every finding at medium or above fixed; accepted lows listed in each record. |
 | Design rules | `STYLE_GUIDE.md` | Written. |
 | Knowledge graph | `graphify-out/` (git-ignored) | Built; code refreshed 2026-10-26 with `graphify update .` (1034 nodes). Doc changes are not re-extracted yet: run `/graphify . --update` for those. |
 
-Deployed 2026-10-27. Not done yet: the print agent on this machine and a first real print (see "Next steps"). See "Next steps".
+Deployed 2026-10-27. Not done yet: the print agent upgrade on this machine, a first real print, and the Google Cloud settings for the calendar sync (see "Next steps").
 
 ## How it works (one paragraph each)
 
@@ -69,6 +70,8 @@ Details and troubleshooting: `agent/README.md`.
 3. ~~Commit, push to `main`.~~ Done.
 4. ~~Deploy.~~ Done 2026-10-27. **Install the print agent on this machine**, point the Linux agent at the hostname and confirm the board shows PRINTER READY.
 5. ~~Refresh the graph.~~ Done 2026-10-26; refresh again after code changes with `/graphify . --update`.
+6. **Google Calendar (user):** in Google Cloud Console, on the sign-in client's project, enable the Google Calendar API and add the scope `https://www.googleapis.com/auth/calendar.app.created` under Google Auth Platform → Data access. Then Settings → Google Calendar → Connect on the board.
+7. **Print agent upgrade (user, sudo):** `sudo sh agent/install.sh` so labels carry urgency, due date and time.
 
 ## Working instructions for the next session
 

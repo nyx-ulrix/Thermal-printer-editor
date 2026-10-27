@@ -24,7 +24,7 @@ app keeps working unchanged; the web build is a second way to run the same edito
 | `AGENT_TOKEN` | Bearer token of the Linux print agent. At least 32 characters (shorter is only accepted with `ALLOW_OPEN_BOARD=1`). |
 | `DEPLOYER_URL`, `DEPLOYER_PROJECT_ID`, `DEPLOYER_API_KEY` | Injected by Deployer; storage goes to the project's MariaDB through the data API (the key must be a service key with developer role: the server runs `CREATE`/`ALTER`/`SELECT` on the query endpoint). The SQL data source must be MariaDB, not MySQL: boot runs `ADD COLUMN IF NOT EXISTS` / `ADD UNIQUE INDEX IF NOT EXISTS`. The first SQL source in the project is used (found through the schema endpoint, which a key may call); `DEPLOYER_SOURCE_ID` picks one explicitly. Without them, storage is files under `DATA_DIR`. |
 | `DATA_DIR` | File storage root: `events.jsonl`, `editor/`, `sessions/`, `payloads/` (directories created `0700`, files `0600`; leftover `*.tmp` files are deleted on boot). Default the directory of `EVENTS_FILE`, else `kanban/data/`. |
-| `GOOGLE_TOKEN_URL` | Local testing only: a stand-in for Google's token endpoint. Refused when `NODE_ENV=production` or either origin is `https:`. |
+| `GOOGLE_TOKEN_URL`, `GOOGLE_CALENDAR_URL` | Local testing only: stand-ins for Google's token endpoint and Calendar API. Refused when `NODE_ENV=production` or either origin is `https:`. |
 | `WEB_DIST` | Built editor directory. Default `<repo>/web-dist`. |
 | `ALLOW_OPEN_BOARD=1` | Local development only: no sign-in at all, `/api/me` answers `{"email":"dev@localhost"}`. Refused when `NODE_ENV=production` or either origin is `https:`. |
 
@@ -72,6 +72,42 @@ without `Secure`. When a request carries several cookies of one name, any one th
 - `GET /api/me` → 200 `{"email", "kanbanUrl", "editorUrl"}` or 401.
 - `Secure` is dropped from cookies only when the site origin is `http://` (local dev).
 
+## Google Calendar sync (`kanban/calendar.mjs`)
+
+One-way, board to calendar, one link per board. Unavailable (`available: false`) with `ALLOW_OPEN_BOARD=1`
+or without a Google client.
+
+- `GET /auth/calendar` (board host only; editor host 404; not signed in → 302 `/auth/login?return=/`):
+  302 to Google with the sign-in's PKCE/state/nonce cookie (state carries `purpose: 'calendar'`),
+  `scope=openid email https://www.googleapis.com/auth/calendar.app.created`, `access_type=offline`,
+  `prompt=consent`, `include_granted_scopes=true`, `login_hint` = the session's email.
+- `/auth/callback` with that state: needs a signed-in session; the id_token is checked as for sign-in but the
+  calendar account need not be in `ALLOWED_EMAILS`; the reply must carry a `refresh_token` and the calendar
+  scope (else a 400 page with "Try again" → `/auth/calendar`). Success → 302 `/?calendar=connected`. Failures
+  other than a missing session count toward the sign-in lockout.
+- `GET /api/calendar` → `{available, connected, email, calendarId, lastSync, error, pending}`;
+  `POST /api/calendar/sync` → 202 (starts a full sync); `POST /api/calendar/disconnect` → 204 (revokes the
+  grant, forgets the link; the calendar itself stays in the Google account). 409 when unavailable or not
+  connected.
+- Stored as key `google` in table `kanban_calendar` (or `DATA_DIR/calendar/`): `{email, refresh, calendarId,
+  connectedAt}`, `refresh` sealed with AES-256-GCM under HKDF(`SESSION_SECRET`). A new `SESSION_SECRET`
+  means connecting again.
+- Events live in a calendar named "Kanban" that the app creates (made again if deleted). An open task with a
+  due date is the event `kb` + its UUID without dashes: all-day (`date`), or 30 min from `dueTime` in
+  `dueTz` (`dateTime` + `timeZone`); summary = title, description = notes, urgency, column and the board
+  URL; colour Tomato/Banana/Peacock for high/medium/low; transparent (never busy). Updated with PUT
+  (falls back to POST on 404); deleted when the task is done, undated or deleted. Reconcile (on boot,
+  every 6 h, on sync) deletes only events whose id is `kb` + 32 hex with no matching open dated task;
+  anything else in the calendar is never touched.
+
+## Installable apps
+
+`GET /manifest.webmanifest`, `GET /sw.js` and `GET /icons/<[a-z0-9-]+>.png` are served WITHOUT sign-in on
+both hosts: from `kanban/public/` on the board host and from `WEB_DIST` on the editor host (the web build
+copies them from `web-public/`). Manifest and worker `no-cache`, icons `public, max-age=86400`. The workers
+cache nothing: they only answer page navigations, from the network, with a small offline page when it is
+down; `/api/*` and `/auth/*` are never touched. The board's CSP has `worker-src 'self'`.
+
 ## Pages
 
 - Kanban host `GET /` → `kanban/public/index.html` (public HTML, CSP by script hash as before). The page
@@ -89,6 +125,9 @@ without `Secure`. When a request carries several cookies of one name, any one th
 Every non-GET `/api/*` and `/auth/logout` call must carry `X-Requested-With: kanban`. JSON in and out.
 Kanban routes are unchanged (`/api/stream`, `/api/tasks`, `/api/tasks/:id`, `/api/tasks/:id/print`), except:
 
+- Tasks: `{title, notes, column, urgency: low|medium|high, due: 'YYYY-MM-DD' or '', dueTime: 'HH:MM' or '',
+  dueTz: IANA zone or '', order}`. A `dueTime` without a `due` (after merging a PATCH) is 400 'Pick a due date
+  before a time'; clearing `due` clears `dueTime`. The agent's task jobs carry `urgency`, `due` and `dueTime`.
 - `/api/stream`: at most 5 open streams per account (429), 50 in all (503). A stream whose reader stops
   reading is dropped after 30 s of unsent backlog.
 - The snapshot's `jobs` holds the latest job of each task plus raw jobs requested in the last 24 h.
@@ -166,6 +205,8 @@ before React renders:
 - Repo root (`.`), preset `node`, branch `main`.
 - Install: `ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci`. Build: `npm run build:web` (Vite → `web-dist/`).
   Start: `npm run start:web` (`node kanban/server.mjs`, listens on `$PORT`).
+- Google Cloud project of the sign-in client: Google Calendar API enabled, scope
+  `https://www.googleapis.com/auth/calendar.app.created` added under Data access (for the calendar sync).
 - Attach API key `kanban-app`. Environment (typed by the owner, never in chat): `GOOGLE_CLIENT_ID`,
   `GOOGLE_CLIENT_SECRET`, `ALLOWED_EMAILS`, `SESSION_SECRET`, `AGENT_TOKEN`, `KANBAN_ORIGIN`, `EDITOR_ORIGIN`.
 - Domains: `kanban.liewjiaen.com` and `printer-editor.liewjiaen.com`, both on this app.
