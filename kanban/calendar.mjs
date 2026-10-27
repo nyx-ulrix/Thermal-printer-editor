@@ -193,7 +193,8 @@ export function calendarSync({ kv, tasks, clientId, clientSecret, secret, boardU
     if (!res.ok || !body.access_token) {
       // invalid_grant: the access was revoked in the Google account, or the token expired unused
       const revoked = body.error === 'invalid_grant'
-      throw Object.assign(new Error(revoked ? 'Google access was removed; connect again in Settings' : `token refresh ${res.status}`), { fatal: revoked })
+      // (an app in Google's Testing mode also gets refresh tokens that lapse after 7 days)
+      throw Object.assign(new Error(revoked ? 'Google access expired or was removed; reconnect to keep syncing' : `token refresh ${res.status}`), { fatal: revoked })
     }
     access = { token: body.access_token, exp: Date.now() + (Number(body.expires_in) || 3600) * 1000 }
     return access.token
@@ -450,7 +451,8 @@ export function calendarSync({ kv, tasks, clientId, clientSecret, secret, boardU
         lastSync: status.lastSync,
         error: status.error,
         pending: pending.size,
-        failed: failed.size
+        failed: failed.size,
+        reconnect: on && stalled // the stored access no longer works: only connecting again heals it
       }
     },
     stop() { clearTimeout(timer); clearInterval(reconcileTimer) }

@@ -70,7 +70,7 @@ Details and troubleshooting: `agent/README.md`.
 3. ~~Commit, push to `main`.~~ Done.
 4. ~~Deploy.~~ Done 2026-10-27. **Install the print agent on this machine**, point the Linux agent at the hostname and confirm the board shows PRINTER READY.
 5. ~~Refresh the graph.~~ Done 2026-10-26; refresh again after code changes with `/graphify . --update`.
-6. **Google Calendar (user):** in Google Cloud Console, on the sign-in client's project, enable the Google Calendar API and add the scope `https://www.googleapis.com/auth/calendar.app.created` under Google Auth Platform → Data access. Then Settings → Google Calendar → Connect on the board.
+6. **Google Calendar:** done 2026-10-27. Calendar API enabled in project 288417034809; the Data access scope step was skipped (Google shows an "unverified app" warning: Advanced → Go to …). `CALENDAR_AT_SIGNIN=1` is set, so signing in links the calendar. The consent screen is in Testing mode: access lapses after 7 days and the board offers Reconnect.
 7. **Print agent upgrade (user, sudo):** `sudo sh agent/install.sh` so labels carry urgency, due date and time.
 
 ## Working instructions for the next session

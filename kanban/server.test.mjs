@@ -1225,7 +1225,7 @@ test('google calendar: connect through the sign-in callback, events follow tasks
     const sid = cookieOf(signed, 'sid')
     const H2 = { ...H, cookie: sid }
     const api = (method, path, body) => request(port, path, { method, headers: H2, body })
-    assert.deepEqual((await api('GET', '/api/calendar')).json, { available: true, atSignIn: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0, failed: 0 })
+    assert.deepEqual((await api('GET', '/api/calendar')).json, { available: true, atSignIn: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0, failed: 0, reconnect: false })
     assert.equal((await request(port, '/api/calendar')).status, 401)
     assert.equal((await request(port, '/api/calendar/disconnect', { method: 'POST', headers: { cookie: sid } })).status, 403)
     assert.equal((await api('POST', '/api/calendar/sync')).status, 409)
@@ -1358,7 +1358,8 @@ test('google calendar: a revoked refresh token stops retrying until connected ag
     await sync.load()
     await sync.connect({ refreshToken: 'rt', email: 'a@b.c' })
     await until(() => sync.status().error, 3000)
-    assert.match(sync.status().error, /connect again/)
+    assert.match(sync.status().error, /reconnect/)
+    assert.equal(sync.status().reconnect, true)
     const refreshes = g.forms.length
     sync.queue(randomUUID())
     await new Promise((r) => setTimeout(r, 1800))

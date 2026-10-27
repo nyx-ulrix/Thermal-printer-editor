@@ -252,6 +252,7 @@ Health check: `GET /healthz` → 200 on either host.
 
 1. *APIs & Services → Library*: enable **Google Calendar API**.
 2. *Google Auth Platform → Data access → Add or remove scopes*: add `https://www.googleapis.com/auth/calendar.app.created` (lets the app create its own calendar and manage events in it, nothing else). Save.
+   You can skip this step: Google then shows an "unverified app" warning while you link the calendar; tap *Advanced → Go to …* to continue. While the consent screen is in *Testing* mode, Google lets the calendar access lapse after 7 days; the board then shows **Reconnect** under Settings → Google, and one tap links it again.
 
 Then connect from the board: Settings → Google Calendar → Connect. Google may show a "Google hasn't verified this app" screen, because the app is unverified; choose *Advanced → Go to …* to continue. No new environment variables are needed: the existing Google client and redirect URI are reused.
 

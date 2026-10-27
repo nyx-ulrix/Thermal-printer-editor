@@ -102,7 +102,7 @@ or without a Google client.
 - `GET /auth/calendar` with a `Sec-Fetch-Site` other than `same-origin` or `none` → 403 page ("Open the
   board first"): another site cannot start a grant for the signed-in owner.
 - `GET /api/calendar` → `{available, atSignIn, connected, email, calendarId, lastSync, error, pending, failed}`
-  (`atSignIn`: `CALENDAR_AT_SIGNIN=1` and available; `failed`: tasks Google refused, see below); `POST /api/calendar/sync` → 202 (starts a full sync; a second
+  (`atSignIn`: `CALENDAR_AT_SIGNIN=1` and available; `failed`: tasks Google refused, see below; `reconnect`: the stored Google access stopped working (`invalid_grant`, e.g. the 7-day limit in Testing mode), so only connecting again heals it); `POST /api/calendar/sync` → 202 (starts a full sync; a second
   call within 30 s starts nothing and just returns the status); `POST /api/calendar/disconnect` → 204
   (revokes the grant, keeps only `{email, calendarId}`; the calendar itself stays in the Google account).
   409 when unavailable or not connected.

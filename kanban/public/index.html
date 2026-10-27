@@ -1758,6 +1758,7 @@ function renderCal(focus) {
       parts.push(row)
     } else {
       parts.push(h('div', { class: 'row' },
+        s.reconnect && h('a', { class: 'btn ic lab', href: s.atSignIn === true ? RESIGN_URL : '/auth/calendar', 'data-ck': 'reconnect', 'aria-label': 'Reconnect Google Calendar', title: 'Reconnect Google Calendar' }, ico('link'), h('span', {}, 'Reconnect')),
         h('button', { class: 'btn ic', type: 'button', 'data-ck': 'sync', disabled: cal.busy, 'aria-label': cal.busy ? 'Syncing' : 'Sync now', title: cal.busy ? 'Syncing' : 'Sync now', onclick: syncCal }, ico(cal.busy ? 'busy' : 'sync')),
         h('a', { class: 'btn ic', href: 'https://calendar.google.com/', target: '_blank', rel: 'noopener', 'aria-label': 'Open Google Calendar (new tab)', title: 'Open Google Calendar' }, ico('cal')),
         ibtn('unlink', 'Disconnect', { 'data-ck': 'disconnect', onclick: () => { cal.confirm = true; renderCal('keep') } })))
