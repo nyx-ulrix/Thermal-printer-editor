@@ -20,4 +20,13 @@ async function boot(): Promise<void> {
   await import('../main')
 }
 
+/** Service worker for the Chrome install prompt (web build only). Failures are harmless. */
+function registerServiceWorker(): void {
+  if (!('serviceWorker' in navigator)) return
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => undefined)
+  })
+}
+
+registerServiceWorker()
 void boot()

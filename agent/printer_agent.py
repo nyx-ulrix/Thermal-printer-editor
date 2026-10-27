@@ -14,6 +14,7 @@ import collections
 import glob
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -98,6 +99,9 @@ def wrap(s, width, max_lines):
     return lines
 
 
+DUE_TIME_RE = re.compile(r'^([01]\d|2[0-3]):[0-5]\d\Z')
+
+
 def build_label(task, cfg):
     w, h = round(cfg['width'] * DOTS_PER_MM), round(cfg['height'] * DOTS_PER_MM)
     x, y = MARGIN + cfg['off_x'], MARGIN + cfg['off_y']
@@ -133,7 +137,10 @@ def build_label(task, cfg):
         pass
     due = clean(task.get('due'))
     if due:
-        foot.append('DUE ' + due)
+        due_time = clean(task.get('dueTime'))
+        due = 'DUE ' + due + (' ' + due_time if DUE_TIME_RE.match(due_time) else '')
+        # The due date matters more than the created time: drop the latter if both don't fit.
+        foot = foot + [due] if len('  '.join(foot + [due])) <= iw // 8 else [due]
     if foot:
         text(footer_y, '1', '  '.join(foot)[:iw // 8])
     out.append('PRINT 1,1')
@@ -563,6 +570,24 @@ def self_test():
                         'created': 0}, cfg).decode('ascii')
     assert '"HIGH  DOING  #abcdef"' in lab4, lab4
     assert '  DUE 2026-11-02"' in lab4, lab4
+    # due time: 'DUE <date> <HH:MM>' when valid; created time dropped rather than the due cut short
+    def footer(task, c=cfg):
+        lines = [l for l in build_label(task, c).decode('ascii').split('\r\n') if l.startswith('TEXT')]
+        return lines[-1].split(',"1",0,1,1,', 1)[1][1:-1]
+    created = time.strftime('%Y-%m-%d %H:%M', time.localtime(0))
+    assert footer({'due': '2026-11-04', 'dueTime': '', 'created': 0}) == created + '  DUE 2026-11-04'
+    for bad in ('24:00', '9:30', '12:60', '12:30x', '1230', '12:3', 'x', None):
+        assert footer({'due': '2026-11-04', 'dueTime': bad}) == 'DUE 2026-11-04', bad
+    assert footer({'due': '2026-11-04', 'dueTime': '15:00'}) == 'DUE 2026-11-04 15:00'
+    assert footer({'dueTime': '15:00', 'created': 0}) == created  # no date: time alone is ignored
+    # 40 mm label: 36 chars inside the margins, created (16) + due with time (20) is 38 -> created dropped
+    assert footer({'due': '2026-11-04', 'dueTime': '15:00', 'created': 0}) == 'DUE 2026-11-04 15:00'
+    wide = load_config({'LABEL_WIDTH_MM': '42'})  # 38 chars: both fit exactly
+    full = footer({'due': '2026-11-04', 'dueTime': '23:59', 'created': 0}, wide)
+    assert full == created + '  DUE 2026-11-04 23:59' and len(full) == 38, full
+    narrow = load_config({'LABEL_WIDTH_MM': '30'})  # 22 chars: even created + date-only won't fit
+    assert footer({'due': '2026-11-04', 'created': 0}, narrow) == 'DUE 2026-11-04'
+    assert footer({'due': '2026-11-04', 'dueTime': '15:00', 'created': 0}, narrow) == 'DUE 2026-11-04 15:00'
     # server URL / token rules
     assert server_error(load_config({'SERVER_URL': 'http://example.com', 'AGENT_TOKEN': 't'}))
     assert server_error(load_config({'SERVER_URL': 'https://example.com'}))

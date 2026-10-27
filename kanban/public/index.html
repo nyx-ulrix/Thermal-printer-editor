@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light">
 <title>KANBAN</title>
+<meta name="theme-color" content="#F4EFE6">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap">
@@ -99,6 +104,9 @@ fieldset.field legend{margin-bottom:6px;padding:0}
 .cal-day[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--paper)}
 .cal-day:focus-visible{outline-offset:1px}
 .cal-foot{display:flex;justify-content:space-between;gap:12px;padding-top:8px;border-top:2px solid var(--ink)}
+/* due date and typed time share one row: the date wide, the time narrow */
+.due-row{display:grid;grid-template-columns:minmax(0,1fr) 96px;gap:8px;align-items:start}
+.field .due-row input.time{min-width:0;font-variant-numeric:tabular-nums}
 
 /* ---------- login ---------- */
 .login{min-height:100dvh;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:var(--pad);padding:var(--pad);align-items:center;max-width:1400px;margin:0 auto}
@@ -139,6 +147,12 @@ fieldset.field legend{margin-bottom:6px;padding:0}
 .acct{display:grid;gap:12px;align-content:start}
 .acct .who{display:grid;gap:4px;margin:0}
 .acct .who strong{font-size:15px;overflow-wrap:anywhere}
+.acct .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+a.btn{color:inherit;text-decoration:none;display:inline-flex;align-items:center}
+.gcal{display:grid;gap:10px;margin-top:6px;padding-top:14px;border-top:2px solid var(--ink)}
+.gcal-body{display:grid;gap:10px}
+.gcal p{margin:0;overflow-wrap:anywhere}
+.gcal .ask{font-size:12px;font-weight:700;flex-basis:100%}
 .mon-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px}
 .mon-body{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:clamp(20px,3vw,48px)}
 .knobs{position:relative;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:clamp(8px,2vw,28px)}
@@ -237,6 +251,19 @@ fieldset.field legend{margin-bottom:6px;padding:0}
 .actions .btn.solid{padding-inline:8px}
 .actions .link{padding:8px 1px;letter-spacing:.06em;min-height:36px;display:inline-flex;align-items:center}
 .btn.mv{min-width:40px;padding:2px 8px;font-size:18px;letter-spacing:0;line-height:1}
+/* move arrows: side by side the columns are reached by dragging, so the arrows show only to the keyboard
+   (a card with focus inside); stacked they point up and down */
+.mv .g-stack{display:none}
+@media (min-width:821px){
+  .actions .btn.mv{display:none}
+  .card:focus-within .actions .btn.mv{display:inline-flex;align-items:center;justify-content:center}
+  .foot .hint-stack{display:none}
+}
+@media (max-width:820px){
+  .mv .g-side{display:none}
+  .mv .g-stack{display:inline}
+  .foot .hint-side{display:none}
+}
 .actions .ask{font-size:12px;font-weight:700;flex-basis:100%}
 .grip{display:none}
 .edit{display:grid;gap:12px}
@@ -280,8 +307,9 @@ fieldset.field legend{margin-bottom:6px;padding:0}
   .btn{min-height:42px;padding:8px 12px}
   .grip{display:grid;place-items:center;position:absolute;left:-2px;top:50%;width:22px;height:48px;margin-top:-24px;touch-action:none;cursor:grab;
     background:radial-gradient(circle,var(--ink) 0 1.6px,transparent 2px) 0 0/7px 7px;background-color:var(--sheet);border:2px solid var(--ink)}
-  .card{padding-left:28px;cursor:default;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-  .card.editing{padding-left:14px}
+  /* a finger on a card drags it; it never scrolls the page */
+  .card{padding-left:28px;cursor:default;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:none}
+  .card.editing{padding-left:14px;touch-action:auto;-webkit-user-select:auto;user-select:auto}
   .card .urg{margin-left:-28px;padding-left:28px}
   .ink-opt{min-height:42px}
   .prn,.disc{min-height:42px}
@@ -378,7 +406,14 @@ fieldset.field legend{margin-bottom:6px;padding:0}
     <section class="acct" aria-labelledby="acct-h">
       <h3 class="label" id="acct-h">Account</h3>
       <p class="who" id="who" hidden><span class="muted">Signed in as</span><strong id="who-email"></strong></p>
-      <div><button class="btn" id="logout" type="button">Sign out</button></div>
+      <div class="row">
+        <button class="btn" id="logout" type="button">Sign out</button>
+        <button class="btn" id="install" type="button" hidden>Install app</button>
+      </div>
+      <section class="gcal" aria-labelledby="gcal-h">
+        <h3 class="label" id="gcal-h">Google Calendar</h3>
+        <div class="gcal-body" id="gcal-body"></div>
+      </section>
     </section>
     <section class="monitor" id="monitor" aria-labelledby="mon-h">
     <div class="mon-head">
@@ -441,6 +476,7 @@ fieldset.field legend{margin-bottom:6px;padding:0}
       <fieldset class="field" id="f-urg"><legend class="label">Urgency</legend></fieldset>
       <div class="field" id="f-due-field">
         <label class="label" for="f-due">Due <span class="muted">(optional)</span></label>
+        <div class="due-row" id="f-due-row"></div>
       </div>
       <p class="err wide" id="add-err" role="alert"></p>
       <div class="wide"><button class="big" type="submit" id="add-btn">Add task</button></div>
@@ -451,8 +487,8 @@ fieldset.field legend{margin-bottom:6px;padding:0}
 
   <footer class="foot">
     <span>KANBAN</span>
-    <span class="fine">Drag cards, or use the arrow buttons</span>
-    <span class="coarse">Hold a card or its dotted handle to drag it, or use the arrows</span>
+    <span class="fine">Drag cards between columns<span class="hint-side">, or Tab to a card for its move buttons</span><span class="hint-stack">, or use the arrow buttons</span></span>
+    <span class="coarse">Drag a card to move it<span class="hint-stack">, or use the arrows</span></span>
   </footer>
 </div>
 
@@ -771,11 +807,17 @@ for (const c of COLS) {
   setCol(c.id, saved ? saved === 'open' : c.id !== 'done')
 }
 const colOf = (t) => (COLS.some((c) => c.id === t.column) ? t.column : 'todo')
-// Soonest due date first (no date last), then the most urgent, then the order they were added in
+// Soonest due date first (no date last), then due time (no time after any time that day), then the most
+// urgent, then the order they were added in. A timed task sorts by its local date and time.
 const URGENCY_RANK = { high: 0, medium: 1, low: 2 }
-const dueKey = (t) => (typeof t.due === 'string' && t.due) || '9999-12-31'
+const dueKey = (t) => {
+  if (!hasDue(t)) return '9999-12-31 ~'
+  const at = dueAt(t)
+  return at ? `${localDay(at)} ${hm24(at)}` : `${t.due} ~` // '~' sorts after any 'HH:MM'
+}
+const byCode = (x, y) => (x < y ? -1 : x > y ? 1 : 0) // not localeCompare: it ranks '~' before digits
 const sorted = (col) => [...state.tasks.values()].filter((t) => colOf(t) === col).sort((a, b) =>
-  dueKey(a).localeCompare(dueKey(b)) || URGENCY_RANK[urgencyOf(a)] - URGENCY_RANK[urgencyOf(b)] || a.order - b.order || a.created - b.created)
+  byCode(dueKey(a), dueKey(b)) || URGENCY_RANK[urgencyOf(a)] - URGENCY_RANK[urgencyOf(b)] || a.order - b.order || a.created - b.created)
 
 function clearDrop() {
   document.querySelectorAll('.col.over').forEach((el) => el.classList.remove('over'))
@@ -808,8 +850,8 @@ async function printTask(id) {
   ui.inflight.delete(id); renderBoard()
 }
 
-// Touch drag (HTML5 DnD does not fire for fingers on most phones): by the dotted grip at once, or by
-// holding a card anywhere that is not a control. Near the top or bottom edge the page scrolls, so a card
+// Touch drag (HTML5 DnD does not fire for fingers on most phones): by the dotted grip, or by pressing a
+// card anywhere that is not a control and moving. Near the top or bottom edge the page scrolls, so a card
 // can travel between the stacked columns of the phone layout.
 const coarse = () => matchMedia('(pointer:coarse)').matches
 function startDrag(li, id, x0, y0) {
@@ -859,21 +901,25 @@ function touchDrag(e, li, id) {
   grip.addEventListener('pointerup', onEnd)
   grip.addEventListener('pointercancel', onEnd)
 }
-// Touch events, not pointer events: only a non-passive touchmove can stop the page scrolling once the
-// hold has turned into a drag. Moving before the hold ends is a scroll and lets the card go.
-function holdToDrag(e, li, id) {
-  if (e.touches.length !== 1 || ui.drag || e.target.closest('button, a, input, textarea, select, label, .grip, .date')) return
+// Touch events, not pointer events: cards have touch-action:none on coarse pointers and a non-passive
+// touchmove, so a finger on a card drags it and never scrolls the page. The drag starts after 6 px of
+// movement, so a tap is still a tap; presses on the card's controls are left alone.
+function pressToDrag(e, li, id) {
+  if (e.touches.length !== 1 || ui.drag || e.target.closest('button, a, input, textarea, select, label, .grip, .date, .time')) return
   const x0 = e.touches[0].clientX, y0 = e.touches[0].clientY
   let drag = null
-  const timer = setTimeout(() => { drag = startDrag(li, id, x0, y0) }, 380)
   const onMove = (ev) => {
     const p = ev.touches[0]
-    if (drag) { ev.preventDefault(); drag.move(p.clientX, p.clientY) }
-    else if (Math.hypot(p.clientX - x0, p.clientY - y0) > 10) done(false)
+    if (ev.cancelable) ev.preventDefault()
+    if (!drag) {
+      if (ev.touches.length !== 1) return done(false)
+      if (Math.hypot(p.clientX - x0, p.clientY - y0) < 6) return
+      drag = startDrag(li, id, x0, y0)
+    }
+    drag.move(p.clientX, p.clientY)
   }
   const onEnd = (ev) => done(ev.type === 'touchend')
   function done(commit) {
-    clearTimeout(timer)
     li.removeEventListener('touchmove', onMove)
     li.removeEventListener('touchend', onEnd)
     li.removeEventListener('touchcancel', onEnd)
@@ -895,20 +941,90 @@ function urgencyRadios(name, selected) {
 const urgencyOf = (t) => URGENCY.some((u) => u.id === t.urgency) ? t.urgency : 'medium'
 // 'YYYY-MM-DD' is a calendar day: compare it with today's local date, never through UTC
 const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-function dueLabel(t) {
-  if (typeof t.due !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(t.due)) return null
-  const [y, m, d] = t.due.split('-').map(Number)
-  const day = new Date(y, m - 1, d), today = localDay(), tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
-  const date = day.toLocaleDateString([], { day: 'numeric', month: 'short', ...(y !== new Date().getFullYear() && { year: 'numeric' }) })
-  if (t.due < today && colOf(t) !== 'done') return { text: `Overdue · ${date}`, late: true }
-  if (t.due === today) return { text: 'Due today' }
-  if (t.due === localDay(tomorrow)) return { text: 'Due tomorrow' }
-  return { text: `Due ${date}` }
+const hm24 = (d) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+const TZ = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || '' } catch { return '' } })()
+const hasDue = (t) => typeof t.due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.due)
+const hasTime = (t) => hasDue(t) && typeof t.dueTime === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(t.dueTime)
+// Minutes the zone is ahead of UTC at instant ms (NaN for an unknown zone)
+function zoneOffset(ms, tz) {
+  try {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      .formatToParts(ms).map((x) => [x.type, x.value]))
+    return (Date.UTC(+p.year, p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second) - Math.floor(ms / 1000) * 1000) / 60000
+  } catch { return NaN }
+}
+// The moment a timed task is due: its wall-clock time in the zone it was set in (dueTz), else in this browser's
+const dueCache = new Map()
+function dueAt(t) {
+  if (!hasTime(t)) return null
+  const key = `${t.due} ${t.dueTime} ${t.dueTz || ''}`
+  if (dueCache.has(key)) return new Date(dueCache.get(key))
+  const [y, m, d] = t.due.split('-').map(Number), [hh, mm] = t.dueTime.split(':').map(Number)
+  let ms = new Date(y, m - 1, d, hh, mm).getTime()
+  if (t.dueTz && t.dueTz !== TZ) {
+    const wall = Date.UTC(y, m - 1, d, hh, mm)
+    let off = zoneOffset(wall, t.dueTz)
+    if (!Number.isNaN(off)) {
+      off = zoneOffset(wall - off * 60000, t.dueTz) // second pass settles a daylight-saving edge
+      ms = wall - off * 60000
+    }
+  }
+  dueCache.set(key, ms)
+  return new Date(ms)
+}
+function dueLabel(t, now = new Date()) {
+  if (!hasDue(t)) return null
+  const at = dueAt(t), day = at || dayOf(t.due), iso = localDay(day), today = localDay(now)
+  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1)
+  const date = day.toLocaleDateString([], { day: 'numeric', month: 'short', ...(day.getFullYear() !== now.getFullYear() && { year: 'numeric' }) })
+  const time = at ? at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
+  // done tasks are never overdue; without a time a task is overdue once its day has passed
+  const late = colOf(t) !== 'done' && (at ? now >= at : iso < today)
+  if (late) return { text: `Overdue · ${date}${time ? `, ${time}` : ''}`, late: true }
+  if (iso === today) return { text: `Due today${time ? ' ' + time : ''}` }
+  if (iso === localDay(tomorrow)) return { text: `Due tomorrow${time ? ' ' + time : ''}` }
+  return { text: `Due ${date}${time ? `, ${time}` : ''}` }
+}
+// A typed time: '15:00', '1500', '9:30', '930', '9', '3pm', '3:30 pm', '12am', '12pm'.
+// Returns 'HH:MM', '' for empty, or null when it cannot be read.
+function parseTime(raw) {
+  const s = String(raw || '').trim().toLowerCase().replace(/\./g, '').replace(/\s+/g, '')
+  if (!s) return ''
+  const m = /^(\d{1,2})(?:[:h]?(\d{2}))?(am|pm|a|p)?$/.exec(s)
+  if (!m) return null
+  let hr = Number(m[1]); const min = Number(m[2] || 0), half = m[3]?.[0]
+  if (min > 59) return null
+  if (half) {
+    if (hr < 1 || hr > 12) return null
+    hr = (hr % 12) + (half === 'p' ? 12 : 0)
+  } else if (hr > 23) return null
+  return `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')}`
+}
+const TIME_ERR = 'Type a time like 15:00 or 3pm.'
+// The time box beside the date button. Errors go in the form's own error line.
+function timeField(id, value, err) {
+  const input = h('input', { id, class: 'time', type: 'text', inputmode: 'text', placeholder: 'Time', autocomplete: 'off', spellcheck: 'false',
+    maxlength: '12', 'aria-label': 'Due time (optional)', 'aria-describedby': err.id, value: value || '' })
+  let shown = false // the error line holds a time error
+  const clearErr = () => { input.removeAttribute('aria-invalid'); if (shown) { err.textContent = ''; shown = false } }
+  const check = () => {
+    const v = parseTime(input.value)
+    if (v === null) {
+      input.setAttribute('aria-invalid', 'true'); err.textContent = TIME_ERR; shown = true
+      return null
+    }
+    input.value = v; clearErr()
+    return v
+  }
+  const fail = (msg) => { input.setAttribute('aria-invalid', 'true'); err.textContent = msg; shown = true }
+  input.addEventListener('blur', check)
+  input.addEventListener('input', () => { if (input.getAttribute('aria-invalid') && parseTime(input.value) !== null) clearErr() })
+  return { el: input, check, fail, clear() { input.value = ''; clearErr() } }
 }
 // A calendar in the board's look (the native one cannot be styled). The value is 'YYYY-MM-DD' or ''.
 const WEEK = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
 const dayOf = (iso) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d) }
-function datePicker(id, value = '') {
+function datePicker(id, value = '', onPick) {
   let val = value, cursor = new Date()
   const btn = h('button', { class: 'date-btn', type: 'button', id, 'aria-haspopup': 'dialog', 'aria-expanded': 'false' })
   const title = h('span', { class: 'cal-title', 'aria-live': 'polite' })
@@ -954,7 +1070,7 @@ function datePicker(id, value = '') {
     btn.setAttribute('aria-expanded', String(open))
     if (open) { cursor = val ? dayOf(val) : new Date(); render(true) }
   }
-  function pick(iso) { val = iso; show(); setOpen(false); btn.focus() }
+  function pick(iso) { val = iso; show(); setOpen(false); btn.focus(); onPick?.(iso) }
   btn.addEventListener('click', () => setOpen(cal.hidden))
   days.addEventListener('keydown', (e) => {
     const step = { ArrowLeft: [-1], ArrowRight: [1], ArrowUp: [-7], ArrowDown: [7], PageUp: [0, -1], PageDown: [0, 1],
@@ -989,14 +1105,15 @@ function editForm(t) {
   const title = h('input', { id: 'et' + n, maxlength: '140', required: true, autocomplete: 'off', value: t.title })
   const notes = h('textarea', { id: 'en' + n, maxlength: '1000', rows: '3' })
   notes.value = t.notes || ''
-  const due = datePicker('ed' + n, t.due || '')
-  const err = h('p', { class: 'err', role: 'alert' })
+  const err = h('p', { class: 'err', role: 'alert', id: 'ee' + n })
+  const time = timeField('eh' + n, hasTime(t) ? t.dueTime : '', err)
+  const due = datePicker('ed' + n, t.due || '', (iso) => (iso ? time.check() : time.clear())) // No date clears the time too
   const close = () => { ui.editing = null; renderBoard(); recs.get(t.id)?.el.querySelector('[data-fk$=":edit"]')?.focus() }
   const form = h('form', { class: 'edit', novalidate: true },
     h('div', { class: 'field' }, h('label', { class: 'label', for: 'et' + n }, 'Title'), title),
     h('div', { class: 'field' }, h('label', { class: 'label', for: 'en' + n }, 'Notes'), notes),
     h('fieldset', { class: 'field' }, h('legend', { class: 'label' }, 'Urgency'), h('div', { class: 'swatches' }, urgencyRadios('eu' + n, urgencyOf(t)))),
-    h('div', { class: 'field' }, h('label', { class: 'label', for: 'ed' + n }, 'Due'), due.el),
+    h('div', { class: 'field' }, h('label', { class: 'label', for: 'ed' + n }, 'Due'), h('div', { class: 'due-row' }, due.el, time.el)),
     err,
     h('div', { class: 'row' },
       h('button', { class: 'btn solid', type: 'submit' }, 'Save'),
@@ -1005,10 +1122,13 @@ function editForm(t) {
   form.addEventListener('submit', async (e) => {
     e.preventDefault()
     if (!title.value.trim()) { err.textContent = 'Title is required.'; title.focus(); return }
+    const dueTime = time.check()
+    if (dueTime === null) { time.el.focus(); return }
+    if (dueTime && !due.value) { time.fail('Pick a date first.'); form.querySelector('.date-btn').focus(); return }
     const urgency = form.querySelector('input[type=radio]:checked')?.value || urgencyOf(t)
     form.querySelector('[type=submit]').disabled = true
     try {
-      await api('PATCH', `/api/tasks/${t.id}`, { title: title.value, notes: notes.value, urgency, due: due.value })
+      await api('PATCH', `/api/tasks/${t.id}`, { title: title.value, notes: notes.value, urgency, due: due.value, dueTime, dueTz: TZ })
       close()
     } catch (x) {
       if (!x.quiet) err.textContent = x.message
@@ -1017,6 +1137,8 @@ function editForm(t) {
   })
   return form
 }
+// side by side the next column is to the right; stacked (phone) it is below. CSS shows one glyph.
+const arrow = (side, stacked) => [h('span', { class: 'g-side', 'aria-hidden': 'true' }, side), h('span', { class: 'g-stack', 'aria-hidden': 'true' }, stacked)]
 function buildCard(t) {
   const editing = ui.editing === t.id
   // fingers use the touch drag below; the browser's own long-press drag would fight it
@@ -1029,7 +1151,7 @@ function buildCard(t) {
 
   const grip = h('span', { class: 'grip', 'aria-hidden': 'true', title: 'Drag' })
   grip.addEventListener('pointerdown', (e) => touchDrag(e, li, t.id))
-  li.addEventListener('touchstart', (e) => holdToDrag(e, li, t.id), { passive: true })
+  li.addEventListener('touchstart', (e) => pressToDrag(e, li, t.id), { passive: true })
   li.addEventListener('contextmenu', (e) => { if (ui.drag === t.id) e.preventDefault() })
   li.append(grip, h('h3', { class: 'title' }, t.title))
   if (t.notes) li.append(h('p', { class: 'notes' }, t.notes))
@@ -1054,8 +1176,8 @@ function buildCard(t) {
       h('button', { class: 'btn solid', type: 'button', 'data-fk': fk('print'), disabled: busy, 'aria-label': `${printerReady() ? 'Print' : 'Queue print for'} ${q}`, 'aria-describedby': printerReady() ? null : 'pill-why', onclick: () => printTask(t.id) },
         busy ? 'Sending' : printerReady() ? 'Print' : 'Queue print'),
       // a move that cannot happen is left out rather than shown disabled
-      prev && h('button', { class: 'btn mv', type: 'button', 'data-fk': fk('left'), 'aria-label': `Move ${q} to ${prev.name}`, title: `Move to ${prev.name}`, onclick: () => move(t, -1) }, '←'),
-      next && h('button', { class: 'btn mv', type: 'button', 'data-fk': fk('right'), 'aria-label': `Move ${q} to ${next.name}`, title: `Move to ${next.name}`, onclick: () => move(t, 1) }, '→'),
+      prev && h('button', { class: 'btn mv', type: 'button', 'data-fk': fk('left'), 'aria-label': `Move ${q} to ${prev.name}`, title: `Move to ${prev.name}`, onclick: () => move(t, -1) }, arrow('←', '↑')),
+      next && h('button', { class: 'btn mv', type: 'button', 'data-fk': fk('right'), 'aria-label': `Move ${q} to ${next.name}`, title: `Move to ${next.name}`, onclick: () => move(t, 1) }, arrow('→', '↓')),
       h('span', { class: 'more' },
       h('button', { class: 'link', type: 'button', 'data-fk': fk('edit'), 'aria-label': `Edit ${q}`, onclick: () => {
         ui.editing = t.id; ui.confirmDel = null; renderBoard(); recs.get(t.id)?.el.querySelector('input')?.focus()
@@ -1081,7 +1203,7 @@ function buildCard(t) {
 const recs = new Map()
 const sigOf = (t) => {
   const j = state.jobs.get(t.id)
-  return JSON.stringify([t.updated, t.title, t.notes, t.urgency, t.due, localDay(), t.column, j?.id, j?.status, j?.error, j?.ts, state.printer?.state, ui.inflight.has(t.id), ui.confirmDel === t.id, ui.editing === t.id])
+  return JSON.stringify([t.updated, t.title, t.notes, t.urgency, t.due, t.dueTime, t.dueTz, dueLabel(t)?.text, t.column, j?.id, j?.status, j?.error, j?.ts, state.printer?.state, ui.inflight.has(t.id), ui.confirmDel === t.id, ui.editing === t.id])
 }
 function renderBoard() {
   const fk = document.activeElement?.dataset?.fk
@@ -1117,8 +1239,9 @@ $('#f-title').addEventListener('input', (e) => {
   if (!e.target.value.trim()) return
   e.target.removeAttribute('aria-invalid'); $('#f-title-err').textContent = ''
 })
-const addDue = datePicker('f-due')
-$('#f-due-field').append(addDue.el)
+const addTime = timeField('f-time', '', $('#add-err'))
+const addDue = datePicker('f-due', '', (iso) => (iso ? addTime.check() : addTime.clear())) // No date clears the time too
+$('#f-due-row').append(addDue.el, addTime.el)
 $('#f-urg').append(h('div', { class: 'swatches' }, urgencyRadios('f-urg', 'medium')))
 $('#add').addEventListener('submit', async (e) => {
   e.preventDefault()
@@ -1130,13 +1253,16 @@ $('#add').addEventListener('submit', async (e) => {
   title.removeAttribute('aria-invalid')
   $('#f-title-err').textContent = ''
   err.textContent = ''
+  const dueTime = addTime.check()
+  if (dueTime === null) { addTime.el.focus(); return }
+  if (dueTime && !addDue.value) { addTime.fail('Pick a date first.'); $('#f-due').focus(); return }
   btn.disabled = true
   try {
     await api('POST', '/api/tasks', {
       title: title.value, notes: $('#f-notes').value, column: $('#f-col').value,
-      urgency: e.target.querySelector('input[name=f-urg]:checked')?.value || 'medium', due: addDue.value
+      urgency: e.target.querySelector('input[name=f-urg]:checked')?.value || 'medium', due: addDue.value, dueTime, dueTz: TZ
     })
-    title.value = ''; $('#f-notes').value = ''; addDue.value = ''
+    title.value = ''; $('#f-notes').value = ''; addDue.value = ''; addTime.clear()
     title.focus()
   } catch (x) { if (!x.quiet) err.textContent = x.message }
   btn.disabled = false
@@ -1147,7 +1273,83 @@ const phone = () => matchMedia('(max-width:640px)').matches
 function setSettings(open) {
   $('#settings').hidden = !open
   $('#settings-toggle').setAttribute('aria-expanded', String(open))
-  if (open) $('#settings-h').focus()
+  if (open) { $('#settings-h').focus(); loadCal() }
+}
+
+// ---------------- google calendar (in settings, under account) ----------------
+const cal = { status: null, error: '', busy: false, confirm: false }
+function syncedAt(ms) {
+  const d = new Date(ms)
+  return localDay(d) === localDay() ? hhmm(ms) : d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+}
+function renderCal(focus) {
+  const s = cal.status, body = $('#gcal-body')
+  const parts = []
+  if (!s) {
+    parts.push(cal.error ? h('p', { class: 'err' }, cal.error) : h('p', { class: 'muted' }, 'Checking calendar sync.'))
+    if (cal.error) parts.push(h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', 'data-ck': 'retry', onclick: () => loadCal('retry') }, 'Try again')))
+  } else if (!s.available) {
+    parts.push(h('p', { class: 'muted' }, 'Calendar sync is not set up on this server.'))
+  } else if (!s.connected) {
+    parts.push(h('p', {}, 'Puts open tasks with a due date into a "Kanban" calendar in your Google account. Done tasks drop off.'))
+    if (s.error) parts.push(h('p', { class: 'err' }, s.error))
+    parts.push(h('div', { class: 'row' }, h('a', { class: 'btn', href: '/auth/calendar', 'data-ck': 'connect' }, 'Connect Google Calendar')))
+  } else {
+    parts.push(h('p', {}, h('span', { class: 'muted' }, 'Syncing to '), h('strong', {}, s.email || 'your Google account')))
+    parts.push(h('p', { class: 'muted' }, s.lastSync ? `Last sync ${syncedAt(s.lastSync)}` : 'Waiting for the first sync',
+      Number(s.pending) > 0 ? `, ${s.pending} ${Number(s.pending) === 1 ? 'change' : 'changes'} waiting` : ''))
+    if (s.error) parts.push(h('p', { class: 'err' }, s.error))
+    if (cal.error) parts.push(h('p', { class: 'err' }, cal.error))
+    if (cal.confirm) {
+      const keep = () => { cal.confirm = false; renderCal('disconnect') }
+      const row = h('div', { class: 'row', role: 'group', 'aria-label': 'Confirm disconnect Google Calendar' },
+        h('span', { class: 'ask' }, 'Disconnect Google Calendar?'),
+        h('button', { class: 'btn danger', type: 'button', 'data-ck': 'yes', disabled: cal.busy, onclick: disconnectCal }, 'Disconnect'),
+        h('button', { class: 'btn', type: 'button', 'data-ck': 'keep', onclick: keep }, 'Keep'))
+      row.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); keep() } })
+      parts.push(row)
+    } else {
+      parts.push(h('div', { class: 'row' },
+        h('button', { class: 'btn', type: 'button', 'data-ck': 'sync', disabled: cal.busy, onclick: syncCal }, cal.busy ? 'Syncing' : 'Sync now'),
+        h('button', { class: 'btn', type: 'button', 'data-ck': 'disconnect', onclick: () => { cal.confirm = true; renderCal('keep') } }, 'Disconnect')))
+    }
+    parts.push(h('div', {}, h('a', { class: 'link', href: 'https://calendar.google.com/', target: '_blank', rel: 'noopener' }, 'Open Google Calendar')))
+  }
+  // keep the focus on the same control across a re-render
+  const had = focus || (body.contains(document.activeElement) && document.activeElement.dataset.ck)
+  body.replaceChildren(...parts)
+  if (had) body.querySelector(`[data-ck="${had}"]`)?.focus()
+}
+async function loadCal(focus) {
+  if (!cal.status) { cal.error = ''; renderCal() }
+  try {
+    cal.status = await api('GET', '/api/calendar')
+    cal.error = ''
+  } catch (e) {
+    if (e.quiet) return
+    cal.error = cal.status ? `Could not refresh calendar status. ${e.message}` : `Could not load calendar status. ${e.message}`
+  }
+  renderCal(focus)
+}
+async function syncCal() {
+  cal.busy = true; cal.error = ''; renderCal('sync')
+  try {
+    const r = await api('POST', '/api/calendar/sync')
+    if (r && typeof r === 'object' && 'connected' in r) cal.status = r
+    toast('Calendar sync started.')
+  } catch (e) { if (!e.quiet) cal.error = e.message }
+  cal.busy = false
+  await loadCal('sync')
+}
+async function disconnectCal() {
+  cal.busy = true; renderCal('yes')
+  try {
+    await api('POST', '/api/calendar/disconnect')
+    cal.confirm = false
+    toast('Google Calendar disconnected.')
+  } catch (e) { if (!e.quiet) cal.error = e.message; cal.confirm = false }
+  cal.busy = false
+  await loadCal('connect')
 }
 function setRes(open) {
   $('#res-body').hidden = !open
@@ -1176,6 +1378,38 @@ function startApp() {
   $('#app').hidden = false
   renderPrinter(); renderResources(); renderBoard()
   connect()
+  // back from Google's consent screen
+  const q = new URLSearchParams(location.search)
+  if (q.get('calendar') === 'connected') {
+    q.delete('calendar')
+    history.replaceState(null, '', location.pathname + (String(q) ? '?' + q : '') + location.hash)
+    setSettings(true)
+    toast('Google Calendar connected.')
+  }
+}
+// due labels move with the clock (today, tomorrow, overdue at the minute): re-check every card each minute.
+// The render is keyed, so only cards whose label changed are rebuilt.
+setInterval(() => { if (!$('#app').hidden) renderBoard() }, 30000)
+
+// ---------------- installable app ----------------
+let installPrompt = null
+addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault()
+  installPrompt = e
+  $('#install').hidden = false
+})
+addEventListener('appinstalled', () => { installPrompt = null; $('#install').hidden = true })
+$('#install').addEventListener('click', async () => {
+  if (!installPrompt) return
+  const p = installPrompt
+  installPrompt = null
+  $('#install').hidden = true
+  try { await p.prompt(); await p.userChoice } catch {}
+})
+function registerWorker() { navigator.serviceWorker.register('/sw.js').catch(() => {}) }
+if ('serviceWorker' in navigator) {
+  if (document.readyState === 'complete') registerWorker()
+  else addEventListener('load', registerWorker)
 }
 async function boot() {
   try {

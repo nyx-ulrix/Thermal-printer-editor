@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { apply, cleanAgentReport, createBroker, emptyState, fileStore, safeReturn, signer, start, validRawPrint, validTask } from './server.mjs'
+import { CALENDAR_SCOPE, calendarSync, eventFor, eventId, validZone } from './calendar.mjs'
 
 const SECRET = 's'.repeat(40)
 const listen = (server) => new Promise((r) => server.listen(0, () => r(server.address().port)))
@@ -368,9 +369,11 @@ test('editor storage: cache and templates round trip through files', async () =>
     assert.equal((await put('/api/editor/cache/big', { value: 'x'.repeat(200_000) })).status, 204)
     assert.equal((await put('/api/editor/cache/huge', { value: 'x'.repeat(8 * 1024 * 1024) })).status, 413)
 
-    // Concurrent writes to one key land in order.
+    // Concurrent writes to one key land in order: whichever arrived last, the file and the served value agree.
     await Promise.all([1, 2, 3, 4, 5].map((n) => put('/api/editor/cache/count', { value: n })))
-    assert.equal(await readFile(join(dir, 'editor', 'count.json'), 'utf8'), '5')
+    const served = (await request(port, '/api/editor/cache')).json.values.count
+    assert.ok([1, 2, 3, 4, 5].includes(served))
+    assert.equal(await readFile(join(dir, 'editor', 'count.json'), 'utf8'), String(served))
 
     // A restart reads the files back.
     server.close()
@@ -1031,6 +1034,350 @@ test('task prints: one waiting label per task; a print racing its task deletion 
     const other = await request(port, '/api/tasks', { method: 'POST', headers: H, body: { title: 'race' } })
     const burst = await Promise.all([1, 2, 3, 4, 5].map(() => request(port, `/api/tasks/${other.json.id}/print`, { method: 'POST', headers: H })))
     assert.equal(new Set(burst.map((r) => r.json.id)).size, 1)
+  } finally {
+    server.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('due time: HH:MM and a real zone, defaults, no time without a date, agent gets it', async () => {
+  assert.deepEqual(validTask({ dueTime: '00:00', dueTz: 'Asia/Singapore' }, true), { dueTime: '00:00', dueTz: 'Asia/Singapore' })
+  assert.deepEqual(validTask({ dueTime: '23:59', dueTz: '' }, true), { dueTime: '23:59', dueTz: '' })
+  assert.deepEqual(validTask({ dueTime: null, dueTz: null }, true), { dueTime: '', dueTz: '' })
+  for (const dueTime of ['24:00', '9:30', '09:60', '0930', '09:30:00', 930, ' 09:30']) assert.throws(() => validTask({ dueTime }, true), /dueTime/, String(dueTime))
+  for (const dueTz of ['Mars/Olympus', 'x'.repeat(65), 8, 'Asia/Singapore\n']) assert.throws(() => validTask({ dueTz }, true), /dueTz/, String(dueTz))
+  assert.equal(validZone('Europe/London'), true)
+
+  const { dir, env } = await openBoard()
+  const server = await start(env)
+  const port = await listen(server)
+  const call = (method, path, body) => request(port, path, { method, headers: H, body })
+  try {
+    const plain = await call('POST', '/api/tasks', { title: 'Plain' })
+    assert.equal(plain.json.dueTime, '')
+    assert.equal(plain.json.dueTz, '')
+    const early = await call('POST', '/api/tasks', { title: 'Early', dueTime: '09:00' })
+    assert.equal(early.status, 400)
+    assert.equal(early.json.error, 'Pick a due date before a time')
+    const timed = (await call('POST', '/api/tasks', { title: 'Timed', due: '2026-11-03', dueTime: '09:30', dueTz: 'Asia/Singapore' })).json
+    assert.deepEqual([timed.due, timed.dueTime, timed.dueTz], ['2026-11-03', '09:30', 'Asia/Singapore'])
+    assert.equal((await call('PATCH', `/api/tasks/${plain.json.id}`, { dueTime: '10:00' })).status, 400)
+    assert.equal((await call('PATCH', `/api/tasks/${timed.id}`, { due: '', dueTime: '11:00' })).status, 400)
+    assert.equal((await call('PATCH', `/api/tasks/${timed.id}`, { dueTime: '25:00' })).status, 400)
+
+    // The agent's label shows the time.
+    await request(port, '/api/agent/poll', { method: 'POST', headers: { Authorization: 'Bearer tok' }, body: { printer: { ready: true } } })
+    await call('POST', `/api/tasks/${timed.id}/print`)
+    const { jobs } = (await request(port, '/api/agent/poll', { method: 'POST', headers: { Authorization: 'Bearer tok' }, body: { printer: { ready: true } } })).json
+    assert.equal(jobs[0].task.dueTime, '09:30')
+
+    // Clearing the date clears the time; the replayed log agrees.
+    const cleared = await call('PATCH', `/api/tasks/${timed.id}`, { due: '' })
+    assert.deepEqual([cleared.json.due, cleared.json.dueTime], ['', ''])
+    const again = await start(env)
+    const port2 = await listen(again)
+    const replayed = (await request(port2, `/api/tasks/${timed.id}`, { method: 'PATCH', headers: H, body: {} })).json
+    assert.deepEqual([replayed.due, replayed.dueTime, replayed.dueTz], ['', '', 'Asia/Singapore'])
+    again.close()
+
+    // The open dev board has no Google sign-in, so no calendar either.
+    assert.deepEqual((await request(port, '/api/calendar')).json, { available: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0 })
+    assert.equal((await call('POST', '/api/calendar/sync')).status, 409)
+    assert.equal((await request(port, '/auth/calendar')).status, 404)
+  } finally {
+    server.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('calendar events: all day, timed with zone, none when done or undated', () => {
+  const id = randomUUID()
+  const base = { id, title: 'T', notes: 'N', column: 'todo', urgency: 'high', due: '2026-12-31' }
+  const day = eventFor(base, 'https://k.example.com')
+  assert.equal(day.id, eventId(id))
+  assert.match(day.id, /^kb[0-9a-f]{32}$/)
+  assert.deepEqual([day.start, day.end, day.colorId], [{ date: '2026-12-31' }, { date: '2027-01-01' }, '11'])
+  const late = eventFor({ ...base, dueTime: '23:45', dueTz: 'Asia/Singapore' }, 'https://k.example.com')
+  assert.deepEqual(late.start, { dateTime: '2026-12-31T23:45:00', timeZone: 'Asia/Singapore' })
+  assert.deepEqual(late.end, { dateTime: '2027-01-01T00:15:00', timeZone: 'Asia/Singapore' })
+  // A time without a usable zone stays all day rather than guessing one.
+  assert.deepEqual(eventFor({ ...base, dueTime: '10:00', dueTz: 'Nowhere/Land' }, 'u').start, { date: '2026-12-31' })
+  assert.equal(eventFor({ ...base, column: 'done' }, 'u'), null)
+  assert.equal(eventFor({ ...base, due: '' }, 'u'), null)
+})
+
+/** Stand-ins for Google: token endpoint (code and refresh grants), Calendar API, revoke. */
+async function fakeGoogle() {
+  const g = { claims: {}, grant: {}, forms: [], calls: [], revoked: [], calendars: new Map(), refreshStatus: 200 }
+  const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  const server = http.createServer((req, res) => {
+    let raw = ''
+    req.on('data', (c) => (raw += c))
+    req.on('end', () => {
+      const url = new URL(req.url, 'http://x')
+      const json = (status, body) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(body === undefined ? '' : JSON.stringify(body))
+      if (url.pathname === '/token') {
+        const form = new URLSearchParams(raw)
+        g.forms.push(form)
+        if (form.get('grant_type') === 'refresh_token') {
+          if (g.refreshStatus !== 200) return json(g.refreshStatus, { error: 'invalid_grant' })
+          return json(200, { access_token: `at-${g.forms.length}`, expires_in: 3600 })
+        }
+        return json(200, { id_token: `${enc({ alg: 'RS256' })}.${enc(g.claims)}.sig`, access_token: 'at-code', ...g.grant })
+      }
+      if (url.pathname === '/revoke') {
+        g.revoked.push(new URLSearchParams(raw).get('token'))
+        return json(200, {})
+      }
+      const path = url.pathname.replace(/^\/calendar\/v3/, '')
+      const body = raw ? JSON.parse(raw) : null
+      g.calls.push({ method: req.method, path, body, auth: req.headers.authorization })
+      const parts = path.split('/').filter(Boolean).map(decodeURIComponent)
+      if (req.method === 'POST' && path === '/calendars') {
+        const id = `cal${g.calendars.size + 1}`
+        g.calendars.set(id, new Map())
+        return json(200, { id, summary: body.summary })
+      }
+      const events = g.calendars.get(parts[1])
+      if (!events) return json(404, { error: 'notFound' })
+      if (parts.length === 2) return json(200, { id: parts[1] })
+      if (parts.length === 3 && req.method === 'GET') return json(200, { items: [...events.values()] })
+      if (parts.length === 3 && req.method === 'POST') {
+        events.set(body.id, body)
+        return json(200, body)
+      }
+      const eid = parts[3]
+      if (req.method === 'PUT') {
+        if (!events.has(eid)) return json(404, { error: 'notFound' })
+        events.set(eid, body)
+        return json(200, body)
+      }
+      if (req.method === 'DELETE') {
+        if (!events.delete(eid)) return json(410, { error: 'deleted' })
+        return res.writeHead(204).end()
+      }
+      json(400, { error: 'unexpected' })
+    })
+  })
+  const port = await listen(server)
+  g.url = `http://127.0.0.1:${port}`
+  g.close = () => server.close()
+  return g
+}
+
+test('google calendar: connect through the sign-in callback, events follow tasks, reconcile, disconnect', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'kanban-'))
+  const g = await fakeGoogle()
+  const hooks = { tokenUrl: `${g.url}/token`, calendarUrl: `${g.url}/calendar/v3`, revokeUrl: `${g.url}/revoke` }
+  const env = { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'csecret', ALLOWED_EMAILS: 'me@example.com', SESSION_SECRET: SECRET, EVENTS_FILE: join(dir, 'events.jsonl') }
+  const server = await start(env, hooks)
+  const port = await listen(server)
+  const claims = (params, extra = {}) => ({ iss: 'accounts.google.com', aud: 'cid', exp: Math.floor(Date.now() / 1000) + 300, nonce: params.get('nonce'), email: 'me@example.com', email_verified: true, ...extra })
+  const back = (path, cookie, host = 'kanban.localhost') => request(port, path, { host, headers: { cookie } })
+  try {
+    // Sign in to the board first.
+    const login = await request(port, '/auth/login')
+    const lp = new URL(login.headers.location).searchParams
+    g.claims = claims(lp)
+    const signed = await back(`/auth/callback?code=c&state=${lp.get('state')}`, cookieOf(login, 'oauth'))
+    const sid = cookieOf(signed, 'sid')
+    const H2 = { ...H, cookie: sid }
+    const api = (method, path, body) => request(port, path, { method, headers: H2, body })
+    assert.deepEqual((await api('GET', '/api/calendar')).json, { available: true, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0 })
+    assert.equal((await request(port, '/api/calendar')).status, 401)
+    assert.equal((await request(port, '/api/calendar/disconnect', { method: 'POST', headers: { cookie: sid } })).status, 403)
+    assert.equal((await api('POST', '/api/calendar/sync')).status, 409)
+
+    // Connect: signed in only, board host only.
+    const anon = await request(port, '/auth/calendar')
+    assert.equal(anon.status, 302)
+    assert.equal(anon.headers.location, '/auth/login?return=/')
+    assert.equal((await back('/auth/calendar', sid, 'printer-editor.localhost')).status, 404)
+    const begin = async () => {
+      const res = await back('/auth/calendar', sid)
+      assert.equal(res.status, 302)
+      return { params: new URL(res.headers.location).searchParams, oauth: cookieOf(res, 'oauth') }
+    }
+    const c = await begin()
+    assert.equal(c.params.get('scope'), `openid email ${CALENDAR_SCOPE}`)
+    assert.equal(c.params.get('access_type'), 'offline')
+    assert.equal(c.params.get('prompt'), 'consent')
+    assert.equal(c.params.get('include_granted_scopes'), 'true')
+    assert.equal(c.params.get('login_hint'), 'me@example.com')
+    assert.equal(c.params.get('redirect_uri'), 'http://kanban.localhost:4173/auth/callback')
+    assert.equal(c.params.get('code_challenge_method'), 'S256')
+    const finish = (p, cookie) => back(`/auth/callback?code=c&state=${p.params.get('state')}`, cookie)
+
+    // The user unticked calendar access, or Google sent no refresh token: nothing connected.
+    g.claims = claims(c.params, { email: 'Cal@Gmail.com' })
+    g.grant = { refresh_token: 'rt-secret', scope: 'openid email' }
+    const denied = await finish(c, `${c.oauth}; ${sid}`)
+    assert.equal(denied.status, 400)
+    assert.match(denied.text, /did not grant calendar access/)
+    assert.match(denied.text, /href="\/auth\/calendar"/)
+    g.grant = { scope: `openid ${CALENDAR_SCOPE} email` }
+    assert.equal((await finish(c, `${c.oauth}; ${sid}`)).status, 400)
+    // The state cookie alone is not enough: the board session must come along.
+    g.grant = { refresh_token: 'rt-secret', scope: `openid ${CALENDAR_SCOPE} email` }
+    assert.equal((await finish(c, c.oauth)).status, 400)
+    // id_token claims are still checked.
+    g.claims = claims(c.params, { nonce: 'other' })
+    assert.equal((await finish(c, `${c.oauth}; ${sid}`)).status, 400)
+    assert.equal((await api('GET', '/api/calendar')).json.connected, false)
+
+    // A task dated before connecting is picked up by the first sync.
+    const early = (await api('POST', '/api/tasks', { title: 'Early', due: '2026-11-01' })).json
+    // Any verified account may hold the calendar (not only ALLOWED_EMAILS).
+    g.claims = claims(c.params, { email: 'Cal@Gmail.com' })
+    const ok = await finish(c, `${c.oauth}; ${sid}`)
+    assert.equal(ok.status, 302)
+    assert.equal(ok.headers.location, '/?calendar=connected')
+    assert.match(ok.headers['set-cookie'][0], /^oauth=; /)
+    await until(async () => (await api('GET', '/api/calendar')).json.lastSync, 5000)
+    let status = (await api('GET', '/api/calendar')).json
+    assert.deepEqual([status.connected, status.email, status.calendarId, status.error], [true, 'cal@gmail.com', 'cal1', null])
+    assert.equal(g.calendars.get('cal1').get(eventId(early.id)).summary, 'Early')
+    // The refresh token is used, and stored only sealed.
+    assert.equal(g.forms.at(-1).get('refresh_token'), 'rt-secret')
+    assert.equal(g.calls.every((call) => call.auth?.startsWith('Bearer at-')), true)
+    const stored = await readFile(join(dir, 'calendar', 'google.json'), 'utf8')
+    assert.equal(stored.includes('rt-secret'), false)
+
+    // A new dated task: PUT (404, not there yet), then POST, after the debounce.
+    g.calls.length = 0
+    const task = (await api('POST', '/api/tasks', { title: 'Ship', notes: 'n', due: '2026-11-03', urgency: 'high' })).json
+    const eid = eventId(task.id)
+    await until(() => g.calendars.get('cal1').has(eid), 5000)
+    assert.deepEqual(g.calls.filter((x) => x.path.includes('/events')).map((x) => `${x.method} ${x.path}`), [`PUT /calendars/cal1/events/${eid}`, 'POST /calendars/cal1/events'])
+    assert.deepEqual(g.calls.at(-1).body.start, { date: '2026-11-03' })
+
+    // Hand-made events, and ids that only look like ours, are never touched; a stale event of ours goes.
+    const cal = g.calendars.get('cal1')
+    const stale = `kb${'a'.repeat(32)}`
+    for (const id of ['manual1', 'kbshort', `kb${'a'.repeat(31)}g`, `xkb${'b'.repeat(32)}`, stale]) cal.set(id, { id, summary: 'other' })
+
+    // A time with a zone: a 30-minute event; moved to done or undated: deleted. Sync now also reconciles.
+    g.calls.length = 0
+    const timed = (await api('POST', '/api/tasks', { title: 'Call', due: '2026-11-04', dueTime: '09:30', dueTz: 'Asia/Singapore' })).json
+    await api('PATCH', `/api/tasks/${task.id}`, { column: 'done' })
+    await api('PATCH', `/api/tasks/${early.id}`, { due: '' })
+    const kicked = await api('POST', '/api/calendar/sync')
+    assert.equal(kicked.status, 202)
+    assert.equal(kicked.json.connected, true)
+    const left = ['kbshort', `kb${'a'.repeat(31)}g`, eventId(timed.id), 'manual1', `xkb${'b'.repeat(32)}`].sort()
+    await until(() => JSON.stringify([...cal.keys()].sort()) === JSON.stringify(left), 5000)
+    const put = g.calls.find((x) => x.method === 'PUT' && x.path.endsWith(eventId(timed.id)))
+    assert.deepEqual(put.body.start, { dateTime: '2026-11-04T09:30:00', timeZone: 'Asia/Singapore' })
+    assert.deepEqual(put.body.end, { dateTime: '2026-11-04T10:00:00', timeZone: 'Asia/Singapore' })
+    const deleted = new Set(g.calls.filter((x) => x.method === 'DELETE').map((x) => x.path.split('/').at(-1)))
+    assert.deepEqual([...deleted].sort(), [eid, eventId(early.id), stale].sort())
+    await until(async () => (await api('GET', '/api/calendar')).json.pending === 0, 5000)
+
+    // Deleting a task removes its event too.
+    await api('DELETE', `/api/tasks/${timed.id}`)
+    await until(() => !cal.has(eventId(timed.id)), 5000)
+
+    // The link survives a restart.
+    const again = await start(env, hooks)
+    const port2 = await listen(again)
+    assert.equal((await request(port2, '/api/calendar', { headers: { cookie: sid } })).json.email, 'cal@gmail.com')
+    again.close()
+
+    // Disconnect: the token is revoked at Google and forgotten here.
+    assert.equal((await api('POST', '/api/calendar/disconnect')).status, 204)
+    assert.deepEqual(g.revoked, ['rt-secret'])
+    status = (await api('GET', '/api/calendar')).json
+    assert.deepEqual([status.connected, status.email], [false, null])
+    assert.deepEqual(await readdir(join(dir, 'calendar')), [])
+    assert.equal((await api('POST', '/api/calendar/sync')).status, 409)
+  } finally {
+    server.close()
+    g.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('google calendar: a revoked refresh token stops retrying until connected again', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'kanban-'))
+  const g = await fakeGoogle()
+  g.refreshStatus = 400
+  const sync = calendarSync({
+    kv: { load: async () => [], put: async () => {} },
+    tasks: () => new Map(),
+    clientId: 'cid',
+    clientSecret: 'cs',
+    secret: SECRET,
+    boardUrl: 'http://k',
+    urls: { token: `${g.url}/token`, api: `${g.url}/calendar/v3`, revoke: `${g.url}/revoke` },
+    log: () => {}
+  })
+  try {
+    await sync.load()
+    await sync.connect({ refreshToken: 'rt', email: 'a@b.c' })
+    await until(() => sync.status().error, 3000)
+    assert.match(sync.status().error, /connect again/)
+    const refreshes = g.forms.length
+    sync.queue(randomUUID())
+    await new Promise((r) => setTimeout(r, 1800))
+    assert.equal(g.forms.length, refreshes) // no retry loop against Google
+    g.refreshStatus = 200
+    await sync.syncNow()
+    assert.equal(sync.status().error, null)
+    assert.equal(sync.status().pending, 0)
+  } finally {
+    sync.stop()
+    g.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('installable apps: manifest, service worker and icons without sign-in on both hosts', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'kanban-'))
+  const pub = join(dir, 'public')
+  const dist = join(dir, 'dist')
+  for (const root of [pub, dist]) {
+    await mkdir(join(root, 'icons'), { recursive: true })
+    await writeFile(join(root, 'manifest.webmanifest'), JSON.stringify({ name: root }))
+    await writeFile(join(root, 'sw.js'), `// ${root}`)
+    await writeFile(join(root, 'icons', 'icon-192.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    await writeFile(join(root, 'icons', 'secret.txt'), 'nope')
+  }
+  await writeFile(join(dist, 'index.html'), '<p>editor</p>')
+  const env = { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'cs', ALLOWED_EMAILS: 'me@example.com', SESSION_SECRET: SECRET, EVENTS_FILE: join(dir, 'events.jsonl'), WEB_DIST: dist }
+  const server = await start(env, { publicDir: pub })
+  const port = await listen(server)
+  try {
+    for (const [host, root] of [['kanban.localhost', pub], ['printer-editor.localhost', dist]]) {
+      const manifest = await request(port, '/manifest.webmanifest', { host })
+      assert.equal(manifest.status, 200, host)
+      assert.equal(manifest.headers['content-type'], 'application/manifest+json')
+      assert.equal(manifest.headers['cache-control'], 'no-cache')
+      assert.equal(manifest.headers['x-content-type-options'], 'nosniff')
+      assert.equal(manifest.json.name, root)
+      const sw = await request(port, '/sw.js', { host })
+      assert.match(sw.headers['content-type'], /^text\/javascript/)
+      assert.equal(sw.headers['cache-control'], 'no-cache')
+      assert.equal(sw.text, `// ${root}`)
+      const icon = await request(port, '/icons/icon-192.png', { host })
+      assert.equal(icon.headers['content-type'], 'image/png')
+      assert.equal(icon.headers['cache-control'], 'public, max-age=86400')
+      for (const path of ['/icons/missing.png', '/icons/secret.txt', '/icons/..%2fsw.js', '/icons/%2e%2e%2fsw.png', '/icons/../../events.jsonl', '/icons/Icon.png', '/sw.js/x']) {
+        const res = await request(port, path, { host })
+        assert.notEqual(res.status, 200, `${host}${path}`)
+        assert.doesNotMatch(res.text, /nope/)
+      }
+      assert.equal((await request(port, '/icons/missing.png', { host })).status, 404)
+    }
+    // Everything else on the editor stays behind sign-in; the board allows its own worker.
+    assert.equal((await request(port, '/', { host: 'printer-editor.localhost' })).status, 302)
+    assert.equal((await request(port, '/icons/', { host: 'printer-editor.localhost' })).status, 302)
+    const board = await request(port, '/', { host: 'kanban.localhost' })
+    assert.match(board.headers['content-security-policy'], /worker-src 'self'/)
+    assert.match(board.headers['content-security-policy'], /default-src 'self'/)
+    assert.match(board.headers['content-security-policy'], /img-src 'self'/)
+    // Missing files are a plain 404, not a crash.
+    await rm(join(pub, 'sw.js'))
+    assert.equal((await request(port, '/sw.js', { host: 'kanban.localhost' })).status, 404)
   } finally {
     server.close()
     await rm(dir, { recursive: true, force: true })

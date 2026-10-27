@@ -6,6 +6,7 @@ import { appendFile, mkdir, open as openFile, readFile, readdir, rename, stat, t
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { dirname, extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { CALENDAR_SCOPE, GOOGLE_CALENDAR_URL, calendarSync, validZone } from './calendar.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 export const COLUMNS = ['todo', 'doing', 'done']
@@ -35,6 +36,9 @@ const KEY_RE = /^[A-Za-z0-9._-]{1,100}$/
 const UUID_RE = /^[0-9a-f-]{36}$/
 const UUID4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const SID_RE = /^[A-Za-z0-9_-]{43}$/
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/
+// Install files browsers fetch without cookies (manifest, service worker, icons): public on both hosts.
+const PWA_RE = /^\/(manifest\.webmanifest|sw\.js|icons\/[a-z0-9-]+\.png)$/
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const GOOGLE_ISSUERS = ['https://accounts.google.com', 'accounts.google.com']
@@ -165,6 +169,20 @@ export function validTask(body, partial = false) {
     const real = y && new Date(Date.UTC(y, m - 1, d)).toISOString().startsWith(due)
     if (due !== '' && !real) throw new HttpError(400, 'due must be a date as YYYY-MM-DD, or empty')
     out.due = due
+  }
+  if (body.dueTime !== undefined) {
+    // Wall-clock time on the due day, 24-hour 'HH:MM', or '' for all day.
+    const dueTime = body.dueTime ?? ''
+    if (dueTime !== '' && !(typeof dueTime === 'string' && TIME_RE.test(dueTime))) {
+      throw new HttpError(400, 'dueTime must be a time as HH:MM (00:00 to 23:59), or empty')
+    }
+    out.dueTime = dueTime
+  }
+  if (body.dueTz !== undefined) {
+    // The zone the time is meant in (the browser's), so the calendar event lands at the right instant.
+    const dueTz = body.dueTz ?? ''
+    if (dueTz !== '' && !validZone(dueTz)) throw new HttpError(400, 'dueTz must be a time zone name like Asia/Singapore, or empty')
+    out.dueTz = dueTz
   }
   if (body.order !== undefined) {
     if (typeof body.order !== 'number' || !Number.isFinite(body.order)) throw new HttpError(400, 'order must be a number')
@@ -625,6 +643,8 @@ function pageCsp(html) {
     'font-src https://fonts.gstatic.com',
     "img-src 'self' data:",
     "connect-src 'self'",
+    // The installable app's service worker (sw.js); the manifest falls under default-src.
+    "worker-src 'self'",
     "base-uri 'none'",
     "form-action 'self'",
     "frame-ancestors 'none'"
@@ -650,6 +670,7 @@ const MIME = {
   '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json',
   '.map': 'application/json; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
   '.svg': 'image/svg+xml',
@@ -739,25 +760,30 @@ export async function start(env = process.env, hooks = {}) {
     if (missing.length) throw new Error(`Set ${missing.join(', ')}, or ALLOW_OPEN_BOARD=1 for local development`)
     if (agentToken && agentToken.length < 32) throw new Error('AGENT_TOKEN must be at least 32 characters')
   }
-  if (env.GOOGLE_TOKEN_URL && (env.NODE_ENV === 'production' || kanbanOrigin.startsWith('https:') || editorOrigin.startsWith('https:'))) {
-    throw new Error('GOOGLE_TOKEN_URL is for local testing only: unset it, or NODE_ENV=production / https origins')
+  for (const name of ['GOOGLE_TOKEN_URL', 'GOOGLE_CALENDAR_URL']) {
+    if (env[name] && (env.NODE_ENV === 'production' || kanbanOrigin.startsWith('https:') || editorOrigin.startsWith('https:'))) {
+      throw new Error(`${name} is for local testing only: unset it, or NODE_ENV=production / https origins`)
+    }
   }
   const cookies = signer(secret || randomBytes(32).toString('hex'))
   const tokenUrl = hooks.tokenUrl || env.GOOGLE_TOKEN_URL || GOOGLE_TOKEN_URL
 
-  let store, kv, sessionKv, payloadKv
+  const boardDir = hooks.publicDir || join(HERE, 'public')
+  let store, kv, sessionKv, payloadKv, calendarKv
   if (env.DEPLOYER_URL && env.DEPLOYER_API_KEY) {
     const api = deployerApi({ url: env.DEPLOYER_URL, key: env.DEPLOYER_API_KEY, projectId: env.DEPLOYER_PROJECT_ID, sourceId: env.DEPLOYER_SOURCE_ID })
     store = deployerStore(api)
     kv = deployerKv(api, 'editor_kv')
     sessionKv = deployerKv(api, 'kanban_sessions')
     payloadKv = deployerKv(api, 'print_payloads', 5)
+    calendarKv = deployerKv(api, 'kanban_calendar')
   } else {
     const dataDir = env.DATA_DIR || (env.EVENTS_FILE ? dirname(env.EVENTS_FILE) : join(HERE, 'data'))
     store = fileStore(env.EVENTS_FILE || join(dataDir, 'events.jsonl'))
     kv = fileKv(env.EDITOR_DIR || join(dataDir, 'editor'))
     sessionKv = fileKv(join(dataDir, 'sessions'))
     payloadKv = fileKv(join(dataDir, 'payloads'), '.b64')
+    calendarKv = fileKv(join(dataDir, 'calendar'))
   }
   const warn = (what) => (error) => console.warn(`${what}: ${error.message}`)
 
@@ -856,6 +882,24 @@ export async function start(env = process.env, hooks = {}) {
     else putSession(hash, null).catch(warn('Deleting session'))
   }
   const sidHash = (id) => createHash('sha256').update(id).digest('hex')
+
+  // ---- Google Calendar: due dates pushed one way into a calendar of the board's own ----
+  // Needs the real Google client (the open dev board has no sign-in to connect with).
+  const sync = open || !clientId || !clientSecret ? null : calendarSync({
+    kv: calendarKv,
+    tasks: () => state.tasks,
+    clientId,
+    clientSecret,
+    secret,
+    boardUrl: kanbanOrigin,
+    urls: { token: tokenUrl, api: hooks.calendarUrl || env.GOOGLE_CALENDAR_URL || GOOGLE_CALENDAR_URL, revoke: hooks.revokeUrl }
+  })
+  if (sync) {
+    await withRetry('Loading the calendar link', () => sync.load())
+    broker.subscribe('tasks', ({ data }) => sync.queue(data.id))
+  }
+  const calendarStatus = () =>
+    sync ? { available: true, ...sync.status() } : { available: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0 }
 
   // ---- printer + resources (ephemeral topics) ----
   let agent = null // { lastSeen, stats, printer }
@@ -965,7 +1009,7 @@ export async function start(env = process.env, hooks = {}) {
         } else {
           const task = state.tasks.get(job.taskId)
           if (!task) continue
-          jobs.push({ jobId: job.id, task: { id: task.id, title: task.title, notes: task.notes, column: task.column, urgency: task.urgency ?? 'medium', due: task.due ?? '', created: task.created } })
+          jobs.push({ jobId: job.id, task: { id: task.id, title: task.title, notes: task.notes, column: task.column, urgency: task.urgency ?? 'medium', due: task.due ?? '', dueTime: task.dueTime ?? '', created: task.created } })
         }
         // Persisted so a restart keeps the job sent (and its resend grace) instead of handing it out again.
         // ponytail: up to 10 sequential appends here; a slow Deployer (15 s each) can outlast the agent's 30 s timeout
@@ -1019,27 +1063,32 @@ export async function start(env = process.env, hooks = {}) {
     return null
   }
 
-  function login(req, res, site, query) {
-    const back = safeReturn(query.get('return'))
+  /** Sends the browser to Google. `extra` (the calendar connect flow) adds a purpose and scope to the
+   * same state/PKCE/nonce cookie; it shares the callback, whose redirect URI Google already knows. */
+  function login(req, res, site, query, extra = null) {
+    const back = extra ? extra.back : safeReturn(query.get('return'))
     if (open) return res.writeHead(302, { Location: back, 'Cache-Control': 'no-store' }).end()
     const stateParam = b64url(randomBytes(24))
     const nonce = b64url(randomBytes(24))
     const verifier = b64url(randomBytes(48))
     const challenge = b64url(createHash('sha256').update(verifier).digest())
-    const value = cookies.sign({ state: stateParam, verifier, nonce, back, exp: Date.now() + OAUTH_MS })
+    const value = cookies.sign({ state: stateParam, verifier, nonce, back, ...(extra && { purpose: extra.purpose }), exp: Date.now() + OAUTH_MS })
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: `${site.origin}/auth/callback`,
       response_type: 'code',
-      scope: 'openid email',
+      scope: extra?.scope ?? 'openid email',
       state: stateParam,
       nonce,
       code_challenge: challenge,
       code_challenge_method: 'S256'
     })
+    if (extra) {
+      for (const [key, val] of Object.entries(extra.params ?? {})) if (val) params.set(key, val)
+    }
     // The account chooser only on request ("Use a different Google account"); otherwise Google signs in
     // the current account, steered by the hint the other site passes along.
-    if (query.get('switch') === '1') params.set('prompt', 'select_account')
+    else if (query.get('switch') === '1') params.set('prompt', 'select_account')
     else {
       const hint = loginHint(query.get('hint'))
       if (hint) params.set('login_hint', hint)
@@ -1064,21 +1113,26 @@ export async function start(env = process.env, hooks = {}) {
     const pending = cookieValues(req, cookieName(site, 'oauth'))
       .map((value) => cookies.verify(value))
       .find((p) => p && typeof p.state === 'string' && sameSecret(returned, p.state))
-    // "Try again" goes back to the same page the sign-in started from.
-    const again = loginPath(pending?.back)
+    const calendar = pending?.purpose === 'calendar'
+    // "Try again" goes back to the same page the sign-in started from (or restarts the calendar connect).
+    const again = calendar ? '/auth/calendar' : loginPath(pending?.back)
     const fail = (why, counts = true) => {
       if (counts) signInFailures.fail(ip)
-      // Quoted: parts of `why` come from the request or from Google.
-      if (why) console.warn(`Sign-in failed: ${JSON.stringify(why)}`)
+      // Quoted: parts of `why` come from the request or from Google. Tokens never go into `why`.
+      if (why) console.warn(`${calendar ? 'Calendar connect' : 'Sign-in'} failed: ${JSON.stringify(why)}`)
       res.setHeader('Set-Cookie', clearOauth)
+      if (calendar) return sendPage(res, 400, 'Calendar not connected', 'Connecting Google Calendar did not complete. It may have been cancelled or taken too long.', again, 'Try again')
       sendPage(res, 400, 'Sign-in failed', 'Google sign-in did not complete. It may have been cancelled or taken too long.', again, 'Try again')
     }
     if (signInFailures.limited(ip)) return sendPage(res, 429, 'Too many attempts', 'Too many failed sign-ins. Wait 15 minutes, then try again.', again, 'Try again')
 
     if (!pending) return fail('bad state', false)
     if (!code) return fail(query.get('error') && `Google said ${str(query.get('error'), 64)}`, false)
+    // Connecting a calendar adds to a signed-in board; the state cookie alone is not a sign-in.
+    // Not a guess (the session may just have ended meanwhile), so it does not count.
+    if (calendar && (!sync || site.editor || !signedIn(req, res, site))) return fail('calendar connect without a signed-in board session', false)
 
-    let claims
+    let claims, granted
     try {
       const reply = await fetch(tokenUrl, {
         method: 'POST',
@@ -1094,7 +1148,8 @@ export async function start(env = process.env, hooks = {}) {
         signal: AbortSignal.timeout(10_000)
       })
       if (!reply.ok) return fail(`token endpoint ${reply.status}`)
-      claims = jwtPayload((await reply.json())?.id_token)
+      granted = await reply.json()
+      claims = jwtPayload(granted?.id_token)
     } catch (error) {
       return fail(`token exchange: ${error.message}`)
     }
@@ -1111,6 +1166,8 @@ export async function start(env = process.env, hooks = {}) {
       return fail('id_token claims')
     }
     const email = claims.email.toLowerCase()
+    // Any verified Google account the signed-in owner picks may hold the calendar: no allow list here.
+    if (calendar) return connectCalendar(res, ip, clearOauth, email, claims.email_verified === true, granted, fail)
     if (claims.email_verified !== true || !allowed.has(email)) {
       signInFailures.fail(ip)
       res.setHeader('Set-Cookie', clearOauth)
@@ -1136,6 +1193,40 @@ export async function start(env = process.env, hooks = {}) {
         'Cache-Control': 'no-store'
       })
       .end()
+  }
+
+  async function connectCalendar(res, ip, clearOauth, email, verified, granted, fail) {
+    if (!verified) return fail('calendar account email not verified')
+    const scopes = typeof granted.scope === 'string' ? granted.scope.split(' ') : []
+    if (typeof granted.refresh_token !== 'string' || !granted.refresh_token || !scopes.includes(CALENDAR_SCOPE)) {
+      // The consent screen lets the user untick calendar access; then there is nothing to sync with.
+      signInFailures.fail(ip)
+      console.warn('Calendar connect failed: Google did not grant calendar access')
+      res.setHeader('Set-Cookie', clearOauth)
+      return sendPage(res, 400, 'Calendar not connected', 'Google did not grant calendar access. Tick the calendar permission on the Google screen.', '/auth/calendar', 'Try again')
+    }
+    try {
+      await sync.connect({ refreshToken: granted.refresh_token, email })
+    } catch (error) {
+      return fail(`saving the calendar link: ${error.message}`, false)
+    }
+    signInFailures.clear(ip)
+    res.writeHead(302, { Location: '/?calendar=connected', 'Set-Cookie': clearOauth, 'Cache-Control': 'no-store' }).end()
+  }
+
+  /** `/auth/calendar`: the board owner grants calendar access (kanban host, signed in). */
+  function calendarLogin(req, res, site) {
+    if (site.editor) throw new HttpError(404, 'Not found')
+    if (!sync) return sendPage(res, 404, 'Calendar unavailable', 'Google Calendar sync needs Google sign-in configured on this server.', '/', 'Back to the board')
+    const email = signedIn(req, res, site)
+    if (!email) return res.writeHead(302, { Location: '/auth/login?return=/', 'Cache-Control': 'no-store' }).end()
+    // offline + consent: Google returns a refresh token every time, even for an account that granted before.
+    login(req, res, site, null, {
+      purpose: 'calendar',
+      back: '/',
+      scope: `openid email ${CALENDAR_SCOPE}`,
+      params: { access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', login_hint: loginHint(email) }
+    })
   }
 
   async function logout(req, res, site) {
@@ -1252,6 +1343,22 @@ export async function start(env = process.env, hooks = {}) {
       .end(body)
   }
 
+  /** Manifest, service worker and icons: no sign-in (browsers fetch them without cookies). PWA_RE allows
+   * only fixed names, so the path cannot leave `dir`. */
+  async function publicFile(res, dir, pathname) {
+    const body = await readFile(join(dir, pathname.slice(1))).catch((error) => {
+      if (error.code === 'ENOENT' || error.code === 'EISDIR' || error.code === 'ENOTDIR') throw new HttpError(404, 'Not found')
+      throw error
+    })
+    res
+      .writeHead(200, {
+        'Content-Type': MIME[extname(pathname)],
+        // The worker and manifest must update promptly; icons hardly change.
+        'Cache-Control': pathname.startsWith('/icons/') ? 'public, max-age=86400' : 'no-cache'
+      })
+      .end(body)
+  }
+
   const requesting = new Map() // client jobId -> publish in progress
 
   /** Payload first, then the event; a failed publish takes the payload back out before a retry of
@@ -1273,7 +1380,7 @@ export async function start(env = process.env, hooks = {}) {
     const { pathname } = url
     const method = req.method
     const editor = hostname(req.headers.host ?? '').toLowerCase() === editorHost
-    const site = editor ? { origin: editorOrigin } : { origin: kanbanOrigin }
+    const site = editor ? { origin: editorOrigin, editor } : { origin: kanbanOrigin, editor }
     site.secure = site.origin.startsWith('https:')
     if (site.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000')
 
@@ -1303,10 +1410,12 @@ export async function start(env = process.env, hooks = {}) {
 
     if (pathname === '/auth/login' && method === 'GET') return login(req, res, site, url.searchParams)
     if (pathname === '/auth/callback' && method === 'GET') return callback(req, res, site, url.searchParams)
+    if (pathname === '/auth/calendar' && method === 'GET') return calendarLogin(req, res, site)
     if (pathname === '/auth/logout' && method === 'POST') return logout(req, res, site)
 
     if (!api) {
       if (method !== 'GET' || pathname.startsWith('/auth/')) throw new HttpError(404, 'Not found')
+      if (PWA_RE.test(pathname)) return publicFile(res, editor ? webDist : boardDir, pathname)
       if (editor) {
         if (!signedIn(req, res, site)) {
           return res.writeHead(302, { Location: `/auth/login?return=${encodeURIComponent(pathname + url.search)}`, 'Cache-Control': 'no-store' }).end()
@@ -1332,6 +1441,21 @@ export async function start(env = process.env, hooks = {}) {
       return stream(req, res, email)
     }
     if (pathname === '/api/printer' && method === 'GET') return sendJson(res, 200, printerStatus())
+
+    // ---- Google Calendar ----
+    if (pathname === '/api/calendar' && method === 'GET') return sendJson(res, 200, calendarStatus())
+    if (pathname === '/api/calendar/sync' && method === 'POST') {
+      if (!sync) throw new HttpError(409, 'Google Calendar sync is not available on this server')
+      if (!sync.status().connected) throw new HttpError(409, 'Connect Google Calendar first')
+      // Started, not awaited: Google may be slow; the board reads the outcome from GET /api/calendar.
+      sync.syncNow().catch(warn('Calendar sync'))
+      return sendJson(res, 202, calendarStatus())
+    }
+    if (pathname === '/api/calendar/disconnect' && method === 'POST') {
+      if (!sync) throw new HttpError(409, 'Google Calendar sync is not available on this server')
+      await sync.disconnect()
+      return sendJson(res, 204)
+    }
 
     // ---- editor storage ----
     if (pathname === '/api/editor/cache' && method === 'GET') {
@@ -1400,7 +1524,8 @@ export async function start(env = process.env, hooks = {}) {
       const input = validTask(await readJson(req))
       const column = input.column ?? 'todo'
       const orders = [...state.tasks.values()].filter((t) => t.column === column).map((t) => t.order)
-      const task = { id: randomUUID(), notes: '', color: 'red', urgency: 'medium', due: '', ...input, column, order: Math.max(0, ...orders) + 1 }
+      const task = { id: randomUUID(), notes: '', color: 'red', urgency: 'medium', due: '', dueTime: '', dueTz: '', ...input, column, order: Math.max(0, ...orders) + 1 }
+      if (!task.due && task.dueTime) throw new HttpError(400, 'Pick a due date before a time')
       await broker.publish('tasks', 'task.created', task)
       return sendJson(res, 201, state.tasks.get(task.id))
     }
@@ -1426,6 +1551,13 @@ export async function start(env = process.env, hooks = {}) {
       }
       if (!print && method === 'PATCH') {
         const changes = validTask(await readJson(req), true)
+        // Checked on the merged task here, not in apply(): old logs replay as they were written.
+        const merged = { ...state.tasks.get(id), ...changes }
+        if (!merged.due) {
+          if (changes.dueTime) throw new HttpError(400, 'Pick a due date before a time')
+          // Clearing the date clears its time too.
+          if (merged.dueTime) changes.dueTime = ''
+        }
         await broker.publish('tasks', 'task.updated', { id, ...changes })
         return sendJson(res, 200, state.tasks.get(id))
       }
@@ -1452,6 +1584,7 @@ export async function start(env = process.env, hooks = {}) {
   server.on('close', () => {
     clearInterval(ticker)
     clearInterval(upkeepTimer)
+    sync?.stop()
   })
   return server
 }
