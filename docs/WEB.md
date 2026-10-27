@@ -26,6 +26,7 @@ app keeps working unchanged; the web build is a second way to run the same edito
 | `DATA_DIR` | File storage root: `events.jsonl`, `editor/`, `sessions/`, `payloads/` (directories created `0700`, files `0600`; leftover `*.tmp` files are deleted on boot). Default the directory of `EVENTS_FILE`, else `kanban/data/`. |
 | `GOOGLE_TOKEN_URL`, `GOOGLE_CALENDAR_URL` | Local testing only: stand-ins for Google's token endpoint and Calendar API. Refused when `NODE_ENV=production` or either origin is `https:`. |
 | `WEB_DIST` | Built editor directory. Default `<repo>/web-dist`. |
+| `CALENDAR_AT_SIGNIN=1` | Off by default. Signing in with Google also links Google Calendar (below). Switch it on only after the Calendar API is enabled and the calendar scope added in Google Cloud (until then asking for the scope can break sign-in). Ignored when calendar sync is unavailable. |
 | `ALLOW_OPEN_BOARD=1` | Local development only: no sign-in at all, `/api/me` answers `{"email":"dev@localhost"}`. Refused when `NODE_ENV=production` or either origin is `https:`. |
 
 `BOARD_KEY` (the old passcode) is gone. The server refuses to start without the Google variables,
@@ -49,6 +50,10 @@ without `Secure`. When a request carries several cookies of one name, any one th
   quotes, `<>` or backslash, `x@y.z` shape; anything else is ignored) is forwarded as `login_hint`. Session
   cookies are per host, so the board's "Label editor" link goes to
   `<editorUrl>/auth/login?hint=<signed-in email>` and Google signs straight in to the same account.
+  With `CALENDAR_AT_SIGNIN=1` the scope also has the calendar, plus `access_type=offline` and
+  `include_granted_scopes=true`; while no calendar is linked `prompt=consent` is added (`consent
+  select_account` with `?switch=1`), since Google sends a refresh token only with consent. See "Linking at
+  sign-in" below.
 - `GET /auth/callback` checks `state` against the cookie, exchanges the code at Google's token endpoint
   (client secret + verifier), reads the `id_token` from that direct TLS response and checks `iss`
   (`https://accounts.google.com` or `accounts.google.com`), `aud` = client id, `exp`, `nonce`,
@@ -87,10 +92,17 @@ or without a Google client.
   the session renewal cookie too when that request renewed the session. A failed code exchange or bad
   id_token claims (iss/aud/nonce/exp) count toward the sign-in lockout; a missing session, unticked calendar
   access, no refresh token or an unverified account do not (the user's own choice).
+- Linking at sign-in (`CALENDAR_AT_SIGNIN=1`, both hosts): after a normal sign-in passes every check and its
+  session is made, a reply with a `refresh_token` and the calendar scope links the calendar to the signed-in
+  account (`connect` stores the link, the first sync runs in the background) when no calendar is linked or
+  the same account holds it. A link to another account is never replaced from a sign-in (only through
+  `/auth/calendar`). Unticked calendar access just signs in; a failure to store the link is logged (message
+  only) and the sign-in still succeeds; sign-in failures are unchanged. Once linked, sign-in sends no
+  `prompt` again. `/auth/calendar` stays as the separate connect (and the way to switch accounts).
 - `GET /auth/calendar` with a `Sec-Fetch-Site` other than `same-origin` or `none` → 403 page ("Open the
   board first"): another site cannot start a grant for the signed-in owner.
-- `GET /api/calendar` → `{available, connected, email, calendarId, lastSync, error, pending, failed}`
-  (`failed`: tasks Google refused, see below); `POST /api/calendar/sync` → 202 (starts a full sync; a second
+- `GET /api/calendar` → `{available, atSignIn, connected, email, calendarId, lastSync, error, pending, failed}`
+  (`atSignIn`: `CALENDAR_AT_SIGNIN=1` and available; `failed`: tasks Google refused, see below); `POST /api/calendar/sync` → 202 (starts a full sync; a second
   call within 30 s starts nothing and just returns the status); `POST /api/calendar/disconnect` → 204
   (revokes the grant, keeps only `{email, calendarId}`; the calendar itself stays in the Google account).
   409 when unavailable or not connected.
@@ -235,6 +247,7 @@ before React renders:
   Start: `npm run start:web` (`node kanban/server.mjs`, listens on `$PORT`).
 - Google Cloud project of the sign-in client: Google Calendar API enabled, scope
   `https://www.googleapis.com/auth/calendar.app.created` added under Data access (for the calendar sync).
+  Only then set `CALENDAR_AT_SIGNIN=1` to link the calendar as part of signing in.
 - Attach API key `kanban-app`. Environment (typed by the owner, never in chat): `GOOGLE_CLIENT_ID`,
   `GOOGLE_CLIENT_SECRET`, `ALLOWED_EMAILS`, `SESSION_SECRET`, `AGENT_TOKEN`, `KANBAN_ORIGIN`, `EDITOR_ORIGIN`.
 - Domains: `kanban.liewjiaen.com` and `printer-editor.liewjiaen.com`, both on this app.

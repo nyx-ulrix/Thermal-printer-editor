@@ -193,6 +193,7 @@ test('google sign-in: redirect, callback, allow list, state, server-side session
     assert.equal(params.get('response_type'), 'code')
     assert.equal(params.get('scope'), 'openid email')
     assert.equal(params.get('prompt'), null) // no account chooser unless asked for
+    assert.equal(params.get('access_type'), null) // calendar at sign-in is off unless CALENDAR_AT_SIGNIN=1
     assert.equal(params.get('login_hint'), null)
     assert.equal(params.get('code_challenge_method'), 'S256')
     assert.ok(params.get('state').length >= 32 && params.get('nonce').length >= 32)
@@ -1099,7 +1100,7 @@ test('due time: HH:MM and a real zone, defaults, no time without a date, agent g
     again.close()
 
     // The open dev board has no Google sign-in, so no calendar either.
-    assert.deepEqual((await request(port, '/api/calendar')).json, { available: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0, failed: 0 })
+    assert.deepEqual((await request(port, '/api/calendar')).json, { available: false, atSignIn: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0, failed: 0 })
     assert.equal((await call('POST', '/api/calendar/sync')).status, 409)
     assert.equal((await request(port, '/auth/calendar')).status, 404)
   } finally {
@@ -1224,7 +1225,7 @@ test('google calendar: connect through the sign-in callback, events follow tasks
     const sid = cookieOf(signed, 'sid')
     const H2 = { ...H, cookie: sid }
     const api = (method, path, body) => request(port, path, { method, headers: H2, body })
-    assert.deepEqual((await api('GET', '/api/calendar')).json, { available: true, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0, failed: 0 })
+    assert.deepEqual((await api('GET', '/api/calendar')).json, { available: true, atSignIn: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0, failed: 0 })
     assert.equal((await request(port, '/api/calendar')).status, 401)
     assert.equal((await request(port, '/api/calendar/disconnect', { method: 'POST', headers: { cookie: sid } })).status, 403)
     assert.equal((await api('POST', '/api/calendar/sync')).status, 409)
@@ -1631,6 +1632,92 @@ test('calendar routes: cross-site connect refused, user choices not counted, ren
     assert.deepEqual([second.status, second.json.connected], [202, true])
     await sleep(200)
     assert.equal(lists(), listed + 1)
+  } finally {
+    server.close()
+    g.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('calendar at sign-in: consent until linked, links the signing-in account, never replaces another account', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'kanban-'))
+  const g = await fakeGoogle()
+  const hooks = { tokenUrl: `${g.url}/token`, calendarUrl: `${g.url}/calendar/v3`, revokeUrl: `${g.url}/revoke` }
+  const env = {
+    GOOGLE_CLIENT_ID: 'cid',
+    GOOGLE_CLIENT_SECRET: 'csecret',
+    ALLOWED_EMAILS: 'me@example.com,other@example.com',
+    SESSION_SECRET: SECRET,
+    EVENTS_FILE: join(dir, 'events.jsonl'),
+    CALENDAR_AT_SIGNIN: '1'
+  }
+  const server = await start(env, hooks)
+  const port = await listen(server)
+  const login = async (path = '/auth/login', host = 'kanban.localhost') => {
+    const res = await request(port, path, { host })
+    assert.equal(res.status, 302)
+    return { params: new URL(res.headers.location).searchParams, oauth: cookieOf(res, 'oauth') }
+  }
+  const signIn = async (email, grant, host = 'kanban.localhost') => {
+    const l = await login('/auth/login', host)
+    g.claims = { iss: 'accounts.google.com', aud: 'cid', exp: Math.floor(Date.now() / 1000) + 300, nonce: l.params.get('nonce'), email, email_verified: true }
+    g.grant = grant
+    return request(port, `/auth/callback?code=c&state=${l.params.get('state')}`, { host, headers: { cookie: l.oauth } })
+  }
+  const withCal = (token) => ({ refresh_token: token, scope: `openid email ${CALENDAR_SCOPE}` })
+  try {
+    // Not linked yet: the sign-in asks for the calendar, offline, with consent (both hosts).
+    for (const host of ['kanban.localhost', 'printer-editor.localhost']) {
+      const { params } = await login('/auth/login', host)
+      assert.equal(params.get('scope'), `openid email ${CALENDAR_SCOPE}`)
+      assert.equal(params.get('access_type'), 'offline')
+      assert.equal(params.get('include_granted_scopes'), 'true')
+      assert.equal(params.get('prompt'), 'consent')
+    }
+    assert.equal((await login('/auth/login?hint=me@example.com')).params.get('login_hint'), 'me@example.com')
+    const switched = (await login('/auth/login?switch=1')).params
+    assert.equal(switched.get('prompt'), 'consent select_account')
+    assert.equal(switched.get('login_hint'), null)
+
+    // Calendar permission unticked: signed in, nothing linked.
+    const plain = await signIn('me@example.com', { refresh_token: 'rt-none', scope: 'openid email' })
+    assert.equal(plain.status, 302)
+    const sid = cookieOf(plain, 'sid')
+    const H2 = { ...H, cookie: sid }
+    const status = async () => (await request(port, '/api/calendar', { headers: H2 })).json
+    let s = await status()
+    assert.deepEqual([s.available, s.atSignIn, s.connected], [true, true, false])
+
+    // A refused account gets nothing linked, and its sign-in fails as before.
+    const refused = await signIn('stranger@example.com', withCal('rt-stranger'))
+    assert.equal(refused.status, 403)
+    assert.equal((await status()).connected, false)
+
+    // Granted: the sign-in links the calendar for that account and syncs in the background.
+    const linked = await signIn('Me@Example.com', withCal('rt-me'), 'printer-editor.localhost')
+    assert.equal(linked.status, 302)
+    assert.equal(linked.headers.location, '/')
+    assert.ok(cookieOf(linked, 'sid'))
+    s = await status()
+    assert.deepEqual([s.connected, s.email], [true, 'me@example.com'])
+    await until(async () => (await status()).lastSync, 5000)
+    assert.equal(g.forms.filter((f) => f.get('grant_type') === 'refresh_token').every((f) => f.get('refresh_token') === 'rt-me'), true)
+    assert.equal((await readFile(join(dir, 'calendar', 'google.json'), 'utf8')).includes('rt-me'), false)
+
+    // Linked: sign-in as before (no consent screen, no chooser unless asked).
+    assert.equal((await login()).params.get('prompt'), null)
+    assert.equal((await login('/auth/login?switch=1')).params.get('prompt'), 'select_account')
+
+    // Another allowed account signing in never takes over the link, and nothing is revoked.
+    const other = await signIn('other@example.com', withCal('rt-other'))
+    assert.equal(other.status, 302)
+    assert.ok(cookieOf(other, 'sid'))
+    s = await status()
+    assert.deepEqual([s.connected, s.email], [true, 'me@example.com'])
+    assert.deepEqual(g.revoked, [])
+    await request(port, '/api/calendar/sync', { method: 'POST', headers: H2 })
+    await sleep(200)
+    assert.equal(g.forms.some((f) => f.get('refresh_token') === 'rt-other'), false)
   } finally {
     server.close()
     g.close()

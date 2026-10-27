@@ -153,7 +153,7 @@ fieldset.field legend{margin-bottom:6px;padding:0}
 .account{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px 18px}
 @keyframes blink{50%{opacity:.25}}
 
-/* ---------- settings: account + resource monitor ---------- */
+/* ---------- settings: Google (account + calendar) and resource monitor ---------- */
 .settings{padding:clamp(16px,2vw,24px) 0;border-bottom:6px solid var(--ink)}
 .set-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:12px;border-bottom:2px solid var(--ink)}
 .set-head .h2:focus{outline:none}
@@ -163,7 +163,17 @@ fieldset.field legend{margin-bottom:6px;padding:0}
 .acct .who strong{font-size:15px;overflow-wrap:anywhere}
 .acct .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 a.btn{color:inherit;text-decoration:none;display:inline-flex;align-items:center}
-.gcal{display:grid;gap:10px;margin-top:6px;padding-top:14px;border-top:2px solid var(--ink)}
+.goog-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px}
+.goog-body{display:grid;gap:12px;padding-top:clamp(10px,1.2vw,14px)}
+.goog-body[hidden]{display:none}
+.acct-row{padding-top:12px;border-top:2px solid var(--ink)}
+.gcal{display:grid;gap:10px;padding-top:12px;border-top:2px solid var(--ink)}
+.gcal h4{margin:0}
+/* re-sign-in prompt: a slim yellow strip under the masthead rule */
+.resign{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:8px 0 8px 14px;background:var(--yellow);border-bottom:2px solid var(--ink)}
+.resign[hidden]{display:none}
+.resign p{margin:0;flex:1 1 220px;font-weight:700;font-size:13px}
+.resign .btn.ghost:hover{border-color:var(--ink)}
 .gcal-body{display:grid;gap:10px}
 .gcal p{margin:0;overflow-wrap:anywhere}
 .gcal .ask{font-size:12px;font-weight:700;flex-basis:100%}
@@ -528,23 +538,34 @@ html.pv .card .open:hover .label-art{outline:2px solid #000;outline-offset:-2px}
     </div>
   </header>
 
+  <div class="resign" id="resign" role="region" aria-label="Google Calendar link" hidden>
+    <p>Sign in again to link Google Calendar.</p>
+    <a class="btn ic lab" href="/auth/login?return=/" aria-label="Sign in again to link Google Calendar" title="Sign in again to link Google Calendar"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-link"/></svg><span>Sign in again</span></a>
+    <button class="btn ic ghost" id="resign-x" type="button" aria-label="Dismiss" title="Dismiss"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-x"/></svg></button>
+  </div>
+
   <section class="settings" id="settings" aria-labelledby="settings-h" hidden>
     <div class="set-head">
       <h2 class="h2" id="settings-h" tabindex="-1">Settings</h2>
       <button class="btn ic ghost" id="settings-close" type="button" aria-label="Close settings" title="Close settings"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-x"/></svg></button>
     </div>
     <div class="set-grid">
-    <section class="acct" aria-labelledby="acct-h">
-      <h3 class="label" id="acct-h">Account</h3>
-      <p class="who" id="who" hidden><span class="muted">Signed in as</span><strong id="who-email"></strong></p>
-      <div class="row">
-        <button class="btn ic" id="logout" type="button" aria-label="Sign out" title="Sign out"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-out"/></svg></button>
-        <button class="btn ic" id="install" type="button" hidden aria-label="Install app" title="Install app"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-install"/></svg></button>
+    <section class="acct" aria-labelledby="goog-h">
+      <div class="goog-head">
+        <h3 class="label" id="goog-h"><button class="disc" id="goog-toggle" type="button" aria-expanded="false" aria-controls="goog-body">Google</button></h3>
+        <span class="muted" id="goog-hint"></span>
       </div>
-      <section class="gcal" aria-labelledby="gcal-h">
-        <h3 class="label" id="gcal-h">Google Calendar</h3>
-        <div class="gcal-body" id="gcal-body"></div>
-      </section>
+      <div class="goog-body" id="goog-body" hidden>
+        <p class="who" id="who" hidden><span class="muted">Signed in as</span><strong id="who-email"></strong></p>
+        <section class="gcal" aria-labelledby="gcal-h">
+          <h4 class="label" id="gcal-h">Calendar</h4>
+          <div class="gcal-body" id="gcal-body"></div>
+        </section>
+        <div class="row acct-row">
+          <button class="btn ic" id="logout" type="button" aria-label="Sign out" title="Sign out"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-out"/></svg></button>
+          <button class="btn ic" id="install" type="button" hidden aria-label="Install app" title="Install app"><svg class="icon" aria-hidden="true" focusable="false"><use href="#i-install"/></svg></button>
+        </div>
+      </div>
     </section>
     <section class="monitor" id="monitor" aria-labelledby="mon-h">
     <div class="mon-head">
@@ -1677,7 +1698,7 @@ $('#add').addEventListener('submit', async (e) => {
   btn.disabled = false
 })
 
-// settings (account and resources) open under the header; the add form folds away on phones
+// settings (google and resources) open under the header; the add form folds away on phones
 const phone = () => matchMedia('(max-width:640px)').matches
 function setSettings(open) {
   $('#settings').hidden = !open
@@ -1685,8 +1706,9 @@ function setSettings(open) {
   if (open) { $('#settings-h').focus(); loadCal() }
 }
 
-// ---------------- google calendar (in settings, under account) ----------------
-const cal = { status: null, error: '', busy: false, confirm: false }
+// ---------------- google (account + calendar, one dropdown in settings) ----------------
+const cal = { status: null, error: '', busy: false, confirm: false, opened: '' }
+const RESIGN_URL = '/auth/login?return=/', RESIGN_KEY = 'kanban.resignDismissed'
 function syncedAt(ms) {
   const d = new Date(ms)
   return localDay(d) === localDay() ? hhmm(ms) : d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -1702,7 +1724,11 @@ function renderCal(focus) {
   } else if (!s.connected) {
     parts.push(h('p', {}, 'Puts open tasks with a due date into a "Kanban" calendar in your Google account. Done tasks drop off.'))
     if (s.error) parts.push(h('p', { class: 'err' }, s.error))
-    parts.push(h('div', { class: 'row' }, h('a', { class: 'btn ic lab', href: '/auth/calendar', 'data-ck': 'connect', 'aria-label': 'Connect Google Calendar', title: 'Connect Google Calendar' }, ico('link'), h('span', {}, 'Connect'))))
+    if (cal.error) parts.push(h('p', { class: 'err' }, cal.error))
+    // signed in before the calendar could be linked at sign-in: signing in again links it in one step
+    parts.push(h('div', { class: 'row' }, s.atSignIn === true
+      ? h('a', { class: 'btn ic lab', href: RESIGN_URL, 'data-ck': 'connect', 'aria-label': 'Sign in again to link Google Calendar', title: 'Sign in again to link Google Calendar' }, ico('link'), h('span', {}, 'Sign in again to link'))
+      : h('a', { class: 'btn ic lab', href: '/auth/calendar', 'data-ck': 'connect', 'aria-label': 'Connect Google Calendar', title: 'Connect Google Calendar' }, ico('link'), h('span', {}, 'Connect'))))
   } else {
     parts.push(h('p', {}, h('span', { class: 'muted' }, 'Syncing to '), h('strong', {}, s.email || 'your Google account')))
     parts.push(h('p', { class: 'muted' }, s.lastSync ? `Last sync ${syncedAt(s.lastSync)}` : 'Waiting for the first sync',
@@ -1728,7 +1754,30 @@ function renderCal(focus) {
   const had = focus || (body.contains(document.activeElement) && document.activeElement.dataset.ck)
   body.replaceChildren(...parts)
   if (had) body.querySelector(`[data-ck="${had}"]`)?.focus()
+  renderCalAttention()
 }
+// the closed Google dropdown says the calendar state; it opens by itself (once per cause) when the calendar needs attention
+const needsResign = (s) => !!(s && s.available && s.atSignIn === true && !s.connected)
+function renderCalAttention() {
+  const s = cal.status
+  const trouble = cal.error || (s && s.available && s.error) ? 'error' : needsResign(s) ? 'resign' : ''
+  $('#goog-hint').textContent = trouble === 'error' ? 'Calendar needs attention'
+    : trouble === 'resign' ? 'Sign in again to link calendar'
+    : !s ? '' : !s.available ? '' : s.connected ? 'Calendar linked' : 'Calendar not linked'
+  if (trouble && trouble !== cal.opened) setGoogle(true)
+  cal.opened = trouble
+  $('#resign').hidden = !needsResign(s) || remember(RESIGN_KEY) === '1'
+}
+function setGoogle(open) {
+  $('#goog-body').hidden = !open
+  $('#goog-toggle').setAttribute('aria-expanded', String(open))
+}
+$('#goog-toggle').addEventListener('click', (e) => setGoogle(e.currentTarget.getAttribute('aria-expanded') !== 'true'))
+$('#resign-x').addEventListener('click', () => {
+  remember(RESIGN_KEY, '1')
+  $('#resign').hidden = true
+  $('#settings-toggle').focus()
+})
 async function loadCal(focus) {
   if (!cal.status) { cal.error = ''; renderCal() }
   try {
@@ -1794,9 +1843,10 @@ function startApp() {
   if (q.get('calendar') === 'connected') {
     q.delete('calendar')
     history.replaceState(null, '', location.pathname + (String(q) ? '?' + q : '') + location.hash)
+    setGoogle(true)
     setSettings(true)
     toast('Google Calendar connected.')
-  }
+  } else loadCal() // the re-sign-in prompt needs the calendar status before Settings is ever opened
 }
 // due labels move with the clock (today, tomorrow, overdue at the minute): re-check every card each minute.
 // The render is keyed, so only cards whose label changed are rebuilt.

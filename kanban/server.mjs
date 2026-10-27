@@ -906,8 +906,13 @@ export async function start(env = process.env, hooks = {}) {
     await withRetry('Loading the calendar link', () => sync.load())
     broker.subscribe('tasks', ({ data }) => sync.queue(data.id))
   }
+  // CALENDAR_AT_SIGNIN=1: the sign-in itself asks for calendar access (once the Calendar API and scope are set
+  // up in Google Cloud; before that the scope could break sign-in, so it is off by default).
+  const atSignIn = !!sync && env.CALENDAR_AT_SIGNIN === '1'
   const calendarStatus = () =>
-    sync ? { available: true, ...sync.status() } : { available: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0, failed: 0 }
+    sync
+      ? { available: true, atSignIn, ...sync.status() }
+      : { available: false, atSignIn: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0, failed: 0 }
   let lastSyncNow = -Infinity
 
   // ---- printer + resources (ephemeral topics) ----
@@ -1087,11 +1092,14 @@ export async function start(env = process.env, hooks = {}) {
     const verifier = b64url(randomBytes(48))
     const challenge = b64url(createHash('sha256').update(verifier).digest())
     const value = cookies.sign({ state: stateParam, verifier, nonce, back, ...(extra && { purpose: extra.purpose }), exp: Date.now() + OAUTH_MS })
+    // With CALENDAR_AT_SIGNIN the sign-in also asks for the calendar. Google returns a refresh token only
+    // with consent, so until a calendar is linked the consent screen is shown.
+    const linking = !extra && atSignIn && !sync.status().connected
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: `${site.origin}/auth/callback`,
       response_type: 'code',
-      scope: extra?.scope ?? 'openid email',
+      scope: extra?.scope ?? (atSignIn ? `openid email ${CALENDAR_SCOPE}` : 'openid email'),
       state: stateParam,
       nonce,
       code_challenge: challenge,
@@ -1099,13 +1107,20 @@ export async function start(env = process.env, hooks = {}) {
     })
     if (extra) {
       for (const [key, val] of Object.entries(extra.params ?? {})) if (val) params.set(key, val)
-    }
-    // The account chooser only on request ("Use a different Google account"); otherwise Google signs in
-    // the current account, steered by the hint the other site passes along.
-    else if (query.get('switch') === '1') params.set('prompt', 'select_account')
-    else {
-      const hint = loginHint(query.get('hint'))
-      if (hint) params.set('login_hint', hint)
+    } else {
+      if (atSignIn) {
+        params.set('access_type', 'offline')
+        params.set('include_granted_scopes', 'true')
+      }
+      // The account chooser only on request ("Use a different Google account"); otherwise Google signs in
+      // the current account, steered by the hint the other site passes along.
+      const consent = linking ? 'consent' : ''
+      if (query.get('switch') === '1') params.set('prompt', `${consent} select_account`.trim())
+      else {
+        if (consent) params.set('prompt', consent)
+        const hint = loginHint(query.get('hint'))
+        if (hint) params.set('login_hint', hint)
+      }
     }
     res
       .writeHead(302, {
@@ -1200,6 +1215,7 @@ export async function start(env = process.env, hooks = {}) {
     const session = { email, exp: Date.now() + SESSION_MS }
     await putSession(sidHash(id), JSON.stringify(session))
     sessions.set(sidHash(id), session)
+    if (atSignIn) await linkAtSignIn(email, granted)
     res
       .writeHead(302, {
         Location: safeReturn(pending.back),
@@ -1228,6 +1244,21 @@ export async function start(env = process.env, hooks = {}) {
     // Beside any session renewal signedIn() set on this response.
     addCookie(res, clearOauth)
     res.writeHead(302, { Location: '/?calendar=connected', 'Cache-Control': 'no-store' }).end()
+  }
+
+  /** CALENDAR_AT_SIGNIN: a sign-in that granted calendar access links the calendar, unless another account
+   * holds it (only Settings replaces a link). Unticked access just signs in. Never fails the sign-in. */
+  async function linkAtSignIn(email, granted) {
+    const scopes = typeof granted.scope === 'string' ? granted.scope.split(' ') : []
+    if (typeof granted.refresh_token !== 'string' || !granted.refresh_token || !scopes.includes(CALENDAR_SCOPE)) return
+    const { connected, email: holder } = sync.status()
+    if (connected && holder !== email) return
+    try {
+      // Resolves once the link is stored; the first sync runs in the background.
+      await sync.connect({ refreshToken: granted.refresh_token, email })
+    } catch (error) {
+      console.warn(`Linking the calendar at sign-in failed: ${error.message}`)
+    }
   }
 
   /** `/auth/calendar`: the board owner grants calendar access (kanban host, signed in). */
