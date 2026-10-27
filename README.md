@@ -96,12 +96,14 @@ https://printer-editor.liewjiaen.com is the same React app as the desktop editor
 
 https://kanban.liewjiaen.com is a three-column board (**To do**, **Doing**, **Done**) whose cards can be printed as labels.
 
-- **Cards** have a title (up to 140 characters), optional notes (up to 1000) and an ink colour (red, blue, yellow or pink). Add them with the New task form; edit or delete them on the card (delete asks to confirm).
+- **Cards** have a title (up to 140 characters), optional notes (up to 1000), an urgency (low, medium or high) and an optional due date. Add them with the New task form; edit or delete them on the card (delete asks to confirm).
+- **Colours:** a band across the top of each card shows its urgency (low teal, medium yellow, high red) and its due date: "Due today", "Due tomorrow", the date, or **OVERDUE** once it has passed (not in Done). The card itself takes its column's colour: To do pale red, Doing pale yellow, Done pale blue.
 - **Moving cards:** drag them (by the dotted handle on touch screens) or use the arrow buttons.
 - **Print** on a card queues a label for it. One label per task waits at a time: pressing Print again while one is queued returns the same job instead of queuing another.
 - **Live updates:** every open board sees changes instantly over Server-Sent Events; the board reconnects by itself after a drop.
-- **Printer and server monitor:** the print agent reports printer readiness plus CPU, memory, disk, load, temperature and uptime of its machine with every poll. The board shows PRINTER READY, a reason when it is not ready, or NO AGENT when the agent has stopped reporting. The details panel folds away.
-- **Account links:** the header shows who is signed in, a Sign out button and a link to the label editor that signs you in there with the same Google account.
+- **Label printer:** the bar at the bottom of the page shows READY, or INACTIVE with the reason (agent offline, device missing). Print buttons read *Queue print* while it is inactive; the label waits and prints when the printer is back.
+- **Settings** (header button): your account (the signed-in email and Sign out) and the resource monitor, where the print agent's machine reports CPU, memory, disk, load, temperature and uptime with every poll (a NO AGENT stamp when it has stopped reporting).
+- **Label editor link** in the header signs you in to the editor with the same Google account.
 
 ## How printing works
 
@@ -109,7 +111,7 @@ There are two kinds of print job, and both go through the same queue:
 
 | Kind | Comes from | What the agent receives | How the label is built |
 |---|---|---|---|
-| `task` | Print on a kanban card | the task (title, notes, colour, column) | The agent builds the TSPL itself from the label settings in its env file |
+| `task` | Print on a kanban card | the task (title, notes, column, urgency, due date) | The agent builds the TSPL itself from the label settings in its env file: urgency and column on the top line, the due date in the footer |
 | `raw` | Print in the web editor | base64 TSPL bytes | Sent to the printer unchanged; the editor's TSPL already sets size, gap, density and speed |
 
 A job moves through `queued` → `sent` → `printed` or `failed`:
@@ -289,8 +291,8 @@ All routes answer on both hosts. Every `/api/*` route except the agent's needs a
 | `POST /auth/logout` | End the session |
 | `GET /api/me` | `{email, kanbanUrl, editorUrl}` or 401 |
 | `GET /api/stream` | Server-Sent Events: a snapshot, then every event |
-| `POST /api/tasks` | Create a task `{title, notes?, column?, color?}` |
-| `PATCH /api/tasks/:id` | Change a task (any of title, notes, column, color, order) |
+| `POST /api/tasks` | Create a task `{title, notes?, column?, urgency?, due?}`; urgency `low`, `medium` (default) or `high`, due `YYYY-MM-DD` or empty |
+| `PATCH /api/tasks/:id` | Change a task (any of title, notes, column, urgency, due, order) |
 | `DELETE /api/tasks/:id` | Delete a task |
 | `POST /api/tasks/:id/print` | Queue a label for the task |
 | `GET /api/printer` | Printer state `{state: "ready" or "inactive", reason, target, agent}` |

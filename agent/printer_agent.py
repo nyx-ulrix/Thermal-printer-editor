@@ -116,7 +116,8 @@ def build_label(task, cfg):
     def text(ty, font, s):
         out.append('TEXT %d,%d,"%s",0,1,1,%s' % (x, ty, font, q(s)))
 
-    top = clean(task.get('column')).upper() + '  #' + clean(task.get('id'))[:6]
+    urgency = clean(task.get('urgency')).upper()
+    top = (urgency + '  ' if urgency else '') + clean(task.get('column')).upper() + '  #' + clean(task.get('id'))[:6]
     text(y, '1', top[:iw // 8])
     out.append('BAR %d,%d,%d,3' % (x, y + 14, iw))
     ty = y + 21
@@ -125,10 +126,16 @@ def build_label(task, cfg):
         for line in wrap(clean(task.get(field)), iw // cw, (footer_y - 2 - ty) // lh):
             text(ty, font, line)
             ty += lh
+    foot = []
     try:
-        text(footer_y, '1', time.strftime('%Y-%m-%d %H:%M', time.localtime(float(task.get('created')) / 1000)))
+        foot.append(time.strftime('%Y-%m-%d %H:%M', time.localtime(float(task.get('created')) / 1000)))
     except (TypeError, ValueError, OverflowError, OSError):
         pass
+    due = clean(task.get('due'))
+    if due:
+        foot.append('DUE ' + due)
+    if foot:
+        text(footer_y, '1', '  '.join(foot)[:iw // 8])
     out.append('PRINT 1,1')
     return ('\r\n'.join(out) + '\r\n').encode('ascii')
 
@@ -524,7 +531,7 @@ def run(cfg):
 # ---------------------------------------------------------------- CLI
 
 def sample_task(title):
-    return {'id': 'abc123def', 'title': title, 'column': 'Doing', 'created': time.time() * 1000,
+    return {'id': 'abc123def', 'title': title, 'column': 'Doing', 'urgency': 'high', 'created': time.time() * 1000,
             'notes': 'Calibration sample: text should sit 2 mm inside every edge.'}
 
 
@@ -551,6 +558,11 @@ def self_test():
     big = [l.split(',"3",0,1,1,', 1)[1][1:-1] for l in lab3.split('\r\n') if ',"3",' in l]
     assert len(big) == 6 and all(len(s) <= 18 for s in big) and big[-1].endswith('~'), big
     assert 'zzz' not in lab3
+    # urgency leads the header, the due date joins the footer
+    lab4 = build_label({'id': 'abcdef12', 'title': 't', 'column': 'doing', 'urgency': 'high', 'due': '2026-11-02',
+                        'created': 0}, cfg).decode('ascii')
+    assert '"HIGH  DOING  #abcdef"' in lab4, lab4
+    assert '  DUE 2026-11-02"' in lab4, lab4
     # server URL / token rules
     assert server_error(load_config({'SERVER_URL': 'http://example.com', 'AGENT_TOKEN': 't'}))
     assert server_error(load_config({'SERVER_URL': 'https://example.com'}))

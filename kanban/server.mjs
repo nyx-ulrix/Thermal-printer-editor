@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const HERE = dirname(fileURLToPath(import.meta.url))
 export const COLUMNS = ['todo', 'doing', 'done']
 export const COLORS = ['red', 'blue', 'yellow', 'pink']
+export const URGENCY = ['low', 'medium', 'high']
 const AGENT_STALE_MS = 15_000
 const RESEND_AFTER_MS = 60_000
 const HISTORY = 60
@@ -152,6 +153,18 @@ export function validTask(body, partial = false) {
   if (body.color !== undefined) {
     if (!COLORS.includes(body.color)) throw new HttpError(400, `color must be one of ${COLORS.join(', ')}`)
     out.color = body.color
+  }
+  if (body.urgency !== undefined) {
+    if (!URGENCY.includes(body.urgency)) throw new HttpError(400, `urgency must be one of ${URGENCY.join(', ')}`)
+    out.urgency = body.urgency
+  }
+  if (body.due !== undefined) {
+    // A calendar day, no time or zone: 'YYYY-MM-DD', or '' for none.
+    const due = body.due ?? ''
+    const [y, m, d] = typeof due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(due) ? due.split('-').map(Number) : []
+    const real = y && new Date(Date.UTC(y, m - 1, d)).toISOString().startsWith(due)
+    if (due !== '' && !real) throw new HttpError(400, 'due must be a date as YYYY-MM-DD, or empty')
+    out.due = due
   }
   if (body.order !== undefined) {
     if (typeof body.order !== 'number' || !Number.isFinite(body.order)) throw new HttpError(400, 'order must be a number')
@@ -952,7 +965,7 @@ export async function start(env = process.env, hooks = {}) {
         } else {
           const task = state.tasks.get(job.taskId)
           if (!task) continue
-          jobs.push({ jobId: job.id, task: { id: task.id, title: task.title, notes: task.notes, column: task.column, color: task.color, created: task.created } })
+          jobs.push({ jobId: job.id, task: { id: task.id, title: task.title, notes: task.notes, column: task.column, urgency: task.urgency ?? 'medium', due: task.due ?? '', created: task.created } })
         }
         // Persisted so a restart keeps the job sent (and its resend grace) instead of handing it out again.
         // ponytail: up to 10 sequential appends here; a slow Deployer (15 s each) can outlast the agent's 30 s timeout
@@ -1387,7 +1400,7 @@ export async function start(env = process.env, hooks = {}) {
       const input = validTask(await readJson(req))
       const column = input.column ?? 'todo'
       const orders = [...state.tasks.values()].filter((t) => t.column === column).map((t) => t.order)
-      const task = { id: randomUUID(), notes: '', color: 'red', ...input, column, order: Math.max(0, ...orders) + 1 }
+      const task = { id: randomUUID(), notes: '', color: 'red', urgency: 'medium', due: '', ...input, column, order: Math.max(0, ...orders) + 1 }
       await broker.publish('tasks', 'task.created', task)
       return sendJson(res, 201, state.tasks.get(task.id))
     }
