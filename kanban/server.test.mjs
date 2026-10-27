@@ -1045,8 +1045,16 @@ test('due time: HH:MM and a real zone, defaults, no time without a date, agent g
   assert.deepEqual(validTask({ dueTime: '23:59', dueTz: '' }, true), { dueTime: '23:59', dueTz: '' })
   assert.deepEqual(validTask({ dueTime: null, dueTz: null }, true), { dueTime: '', dueTz: '' })
   for (const dueTime of ['24:00', '9:30', '09:60', '0930', '09:30:00', 930, ' 09:30']) assert.throws(() => validTask({ dueTime }, true), /dueTime/, String(dueTime))
-  for (const dueTz of ['Mars/Olympus', 'x'.repeat(65), 8, 'Asia/Singapore\n']) assert.throws(() => validTask({ dueTz }, true), /dueTz/, String(dueTz))
+  for (const dueTz of ['Mars/Olympus', 'x'.repeat(65), 8, 'Asia/Singapore\n', '+05:00', '-0330', '+0800']) assert.throws(() => validTask({ dueTz }, true), /dueTz/, String(dueTz))
   assert.equal(validZone('Europe/London'), true)
+  assert.equal(validZone('+05:00'), false)
+  // Stored by its canonical name, the one Google takes.
+  assert.deepEqual(validTask({ dueTz: 'asia/singapore' }, true), { dueTz: 'Asia/Singapore' })
+  assert.deepEqual(validTask({ dueTz: 'US/Eastern' }, true), { dueTz: 'America/New_York' })
+  assert.deepEqual(validTask({ dueTz: 'UTC' }, true), { dueTz: 'UTC' })
+  for (const due of ['9999-12-31', '1899-12-31', '0001-01-01']) assert.throws(() => validTask({ due }, true), /due must be/, due)
+  assert.deepEqual(validTask({ due: '1900-01-01' }, true), { due: '1900-01-01' })
+  assert.deepEqual(validTask({ due: '9998-12-31' }, true), { due: '9998-12-31' })
 
   const { dir, env } = await openBoard()
   const server = await start(env)
@@ -1064,6 +1072,16 @@ test('due time: HH:MM and a real zone, defaults, no time without a date, agent g
     assert.equal((await call('PATCH', `/api/tasks/${plain.json.id}`, { dueTime: '10:00' })).status, 400)
     assert.equal((await call('PATCH', `/api/tasks/${timed.id}`, { due: '', dueTime: '11:00' })).status, 400)
     assert.equal((await call('PATCH', `/api/tasks/${timed.id}`, { dueTime: '25:00' })).status, 400)
+    // A time needs the zone it is meant in.
+    const zoneless = await call('POST', '/api/tasks', { title: 'Zoneless', due: '2026-11-03', dueTime: '09:30' })
+    assert.deepEqual([zoneless.status, zoneless.json.error], [400, 'Due time needs a time zone'])
+    assert.equal((await call('PATCH', `/api/tasks/${timed.id}`, { dueTz: '' })).status, 400)
+    assert.equal((await call('PATCH', `/api/tasks/${plain.json.id}`, { due: '2026-11-03', dueTime: '09:30', dueTz: '' })).status, 400)
+    assert.equal((await call('POST', '/api/tasks', { title: 'Odd', due: '2026-11-03', dueTime: '09:30', dueTz: '+08:00' })).status, 400)
+    assert.equal((await call('POST', '/api/tasks', { title: 'Far', due: '9999-12-31' })).status, 400)
+    const lower = (await call('POST', '/api/tasks', { title: 'Lower', due: '2026-11-03', dueTime: '09:30', dueTz: 'asia/singapore' })).json
+    assert.equal(lower.dueTz, 'Asia/Singapore')
+    await call('DELETE', `/api/tasks/${lower.id}`)
 
     // The agent's label shows the time.
     await request(port, '/api/agent/poll', { method: 'POST', headers: { Authorization: 'Bearer tok' }, body: { printer: { ready: true } } })
@@ -1081,7 +1099,7 @@ test('due time: HH:MM and a real zone, defaults, no time without a date, agent g
     again.close()
 
     // The open dev board has no Google sign-in, so no calendar either.
-    assert.deepEqual((await request(port, '/api/calendar')).json, { available: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0 })
+    assert.deepEqual((await request(port, '/api/calendar')).json, { available: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0, failed: 0 })
     assert.equal((await call('POST', '/api/calendar/sync')).status, 409)
     assert.equal((await request(port, '/auth/calendar')).status, 404)
   } finally {
@@ -1097,9 +1115,25 @@ test('calendar events: all day, timed with zone, none when done or undated', () 
   assert.equal(day.id, eventId(id))
   assert.match(day.id, /^kb[0-9a-f]{32}$/)
   assert.deepEqual([day.start, day.end, day.colorId], [{ date: '2026-12-31' }, { date: '2027-01-01' }, '11'])
+  // Timed: real instants (UTC) shown in the task's zone; across midnight and the year end.
   const late = eventFor({ ...base, dueTime: '23:45', dueTz: 'Asia/Singapore' }, 'https://k.example.com')
-  assert.deepEqual(late.start, { dateTime: '2026-12-31T23:45:00', timeZone: 'Asia/Singapore' })
-  assert.deepEqual(late.end, { dateTime: '2027-01-01T00:15:00', timeZone: 'Asia/Singapore' })
+  assert.deepEqual(late.start, { dateTime: '2026-12-31T15:45:00Z', timeZone: 'Asia/Singapore' })
+  assert.deepEqual(late.end, { dateTime: '2026-12-31T16:15:00Z', timeZone: 'Asia/Singapore' })
+  const ny = (due, dueTime) => {
+    const e = eventFor({ ...base, due, dueTime, dueTz: 'America/New_York' }, 'u')
+    assert.equal(Date.parse(e.end.dateTime) - Date.parse(e.start.dateTime), 30 * 60_000)
+    return [e.start.dateTime, e.end.dateTime]
+  }
+  assert.deepEqual(ny('2026-12-31', '23:45'), ['2027-01-01T04:45:00Z', '2027-01-01T05:15:00Z'])
+  // Spring forward (2026-03-08, 02:00 EST -> 03:00 EDT): 01:45 lasts until 03:15 on the clock; the skipped
+  // 02:30 moves on to the change itself, 03:00 EDT.
+  assert.deepEqual(ny('2026-03-08', '01:45'), ['2026-03-08T06:45:00Z', '2026-03-08T07:15:00Z'])
+  assert.deepEqual(ny('2026-03-08', '02:30'), ['2026-03-08T07:00:00Z', '2026-03-08T07:30:00Z'])
+  // Fall back (2026-11-01, 02:00 EDT -> 01:00 EST): the repeated 01:30 is its first occurrence (EDT).
+  assert.deepEqual(ny('2026-11-01', '01:30'), ['2026-11-01T05:30:00Z', '2026-11-01T06:00:00Z'])
+  assert.deepEqual(ny('2026-11-01', '00:45'), ['2026-11-01T04:45:00Z', '2026-11-01T05:15:00Z'])
+  // An old task with a zone in another spelling is sent by its canonical name.
+  assert.equal(eventFor({ ...base, dueTime: '10:00', dueTz: 'asia/singapore' }, 'u').start.timeZone, 'Asia/Singapore')
   // A time without a usable zone stays all day rather than guessing one.
   assert.deepEqual(eventFor({ ...base, dueTime: '10:00', dueTz: 'Nowhere/Land' }, 'u').start, { date: '2026-12-31' })
   assert.equal(eventFor({ ...base, column: 'done' }, 'u'), null)
@@ -1110,10 +1144,11 @@ test('calendar events: all day, timed with zone, none when done or undated', () 
 async function fakeGoogle() {
   const g = { claims: {}, grant: {}, forms: [], calls: [], revoked: [], calendars: new Map(), refreshStatus: 200 }
   const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
+  // g.refuse(method, body) -> { status, body } makes an event write fail; g.delay holds event writes (ms).
   const server = http.createServer((req, res) => {
     let raw = ''
     req.on('data', (c) => (raw += c))
-    req.on('end', () => {
+    req.on('end', async () => {
       const url = new URL(req.url, 'http://x')
       const json = (status, body) => res.writeHead(status, { 'Content-Type': 'application/json' }).end(body === undefined ? '' : JSON.stringify(body))
       if (url.pathname === '/token') {
@@ -1134,7 +1169,8 @@ async function fakeGoogle() {
       g.calls.push({ method: req.method, path, body, auth: req.headers.authorization })
       const parts = path.split('/').filter(Boolean).map(decodeURIComponent)
       if (req.method === 'POST' && path === '/calendars') {
-        const id = `cal${g.calendars.size + 1}`
+        g.made = (g.made ?? 0) + 1 // never reuses the id of a deleted calendar
+        const id = `cal${g.made}`
         g.calendars.set(id, new Map())
         return json(200, { id, summary: body.summary })
       }
@@ -1143,10 +1179,15 @@ async function fakeGoogle() {
       if (parts.length === 2) return json(200, { id: parts[1] })
       if (parts.length === 3 && req.method === 'GET') return json(200, { items: [...events.values()] })
       if (parts.length === 3 && req.method === 'POST') {
+        const refused = g.refuse?.(req.method, body)
+        if (refused) return json(refused.status, refused.body)
         events.set(body.id, body)
         return json(200, body)
       }
       const eid = parts[3]
+      if (g.delay && body) await new Promise((r) => setTimeout(r, g.delay))
+      const refused = body && g.refuse?.(req.method, body)
+      if (refused) return json(refused.status, refused.body)
       if (req.method === 'PUT') {
         if (!events.has(eid)) return json(404, { error: 'notFound' })
         events.set(eid, body)
@@ -1183,7 +1224,7 @@ test('google calendar: connect through the sign-in callback, events follow tasks
     const sid = cookieOf(signed, 'sid')
     const H2 = { ...H, cookie: sid }
     const api = (method, path, body) => request(port, path, { method, headers: H2, body })
-    assert.deepEqual((await api('GET', '/api/calendar')).json, { available: true, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0 })
+    assert.deepEqual((await api('GET', '/api/calendar')).json, { available: true, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0, failed: 0 })
     assert.equal((await request(port, '/api/calendar')).status, 401)
     assert.equal((await request(port, '/api/calendar/disconnect', { method: 'POST', headers: { cookie: sid } })).status, 403)
     assert.equal((await api('POST', '/api/calendar/sync')).status, 409)
@@ -1267,8 +1308,8 @@ test('google calendar: connect through the sign-in callback, events follow tasks
     const left = ['kbshort', `kb${'a'.repeat(31)}g`, eventId(timed.id), 'manual1', `xkb${'b'.repeat(32)}`].sort()
     await until(() => JSON.stringify([...cal.keys()].sort()) === JSON.stringify(left), 5000)
     const put = g.calls.find((x) => x.method === 'PUT' && x.path.endsWith(eventId(timed.id)))
-    assert.deepEqual(put.body.start, { dateTime: '2026-11-04T09:30:00', timeZone: 'Asia/Singapore' })
-    assert.deepEqual(put.body.end, { dateTime: '2026-11-04T10:00:00', timeZone: 'Asia/Singapore' })
+    assert.deepEqual(put.body.start, { dateTime: '2026-11-04T01:30:00Z', timeZone: 'Asia/Singapore' })
+    assert.deepEqual(put.body.end, { dateTime: '2026-11-04T02:00:00Z', timeZone: 'Asia/Singapore' })
     const deleted = new Set(g.calls.filter((x) => x.method === 'DELETE').map((x) => x.path.split('/').at(-1)))
     assert.deepEqual([...deleted].sort(), [eid, eventId(early.id), stale].sort())
     await until(async () => (await api('GET', '/api/calendar')).json.pending === 0, 5000)
@@ -1288,7 +1329,8 @@ test('google calendar: connect through the sign-in callback, events follow tasks
     assert.deepEqual(g.revoked, ['rt-secret'])
     status = (await api('GET', '/api/calendar')).json
     assert.deepEqual([status.connected, status.email], [false, null])
-    assert.deepEqual(await readdir(join(dir, 'calendar')), [])
+    // Only the account and its calendar stay, so connecting it again reuses that calendar.
+    assert.deepEqual(JSON.parse(await readFile(join(dir, 'calendar', 'google.json'), 'utf8')), { email: 'cal@gmail.com', calendarId: 'cal1' })
     assert.equal((await api('POST', '/api/calendar/sync')).status, 409)
   } finally {
     server.close()
@@ -1326,6 +1368,271 @@ test('google calendar: a revoked refresh token stops retrying until connected ag
     assert.equal(sync.status().pending, 0)
   } finally {
     sync.stop()
+    g.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+/** A calendarSync against fakeGoogle, with short timings. */
+function syncFor(g, tasks, timing = { debounce: 50, maxWait: 200 }) {
+  const logs = []
+  const sync = calendarSync({
+    kv: { load: async () => [], put: async () => {} },
+    tasks: () => tasks,
+    clientId: 'cid',
+    clientSecret: 'cs',
+    secret: SECRET,
+    boardUrl: 'http://k',
+    urls: { token: `${g.url}/token`, api: `${g.url}/calendar/v3`, revoke: `${g.url}/revoke` },
+    log: (m) => logs.push(m),
+    timing
+  })
+  return { sync, logs }
+}
+const dated = (tasks, title, extra = {}) => {
+  const t = { id: randomUUID(), title, column: 'todo', urgency: 'medium', due: '2026-11-03', dueTime: '', dueTz: '', ...extra }
+  tasks.set(t.id, t)
+  return t
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+test('fold: an update that leaves no date clears the time, whatever order two edits came in', () => {
+  const state = emptyState()
+  apply(state, { type: 'task.created', data: { id: 't', title: 'T', due: '2026-11-03', dueTime: '09:00', dueTz: 'UTC' }, ts: 1 })
+  apply(state, { type: 'task.updated', data: { id: 't', due: '' }, ts: 2 })
+  assert.deepEqual([state.tasks.get('t').due, state.tasks.get('t').dueTime], ['', ''])
+  // A time set by a PATCH checked against the old date, landing after the date was cleared.
+  apply(state, { type: 'task.updated', data: { id: 't', dueTime: '10:00' }, ts: 3 })
+  assert.equal(state.tasks.get('t').dueTime, '')
+})
+
+test('calendar sync: a task Google refuses is parked, the rest sync; a rate limit stops the run and is kept', async () => {
+  const g = await fakeGoogle()
+  const tasks = new Map()
+  const first = dated(tasks, 'First')
+  const bad = dated(tasks, 'BAD')
+  const last = dated(tasks, 'Last')
+  g.refuse = (method, body) => (body.summary === 'BAD' ? { status: 400, body: { error: { message: 'Invalid start time' } } } : null)
+  const { sync, logs } = syncFor(g, tasks)
+  try {
+    await sync.connect({ refreshToken: 'rt', email: 'a@b.c' })
+    await until(() => sync.status().lastSync)
+    const cal = g.calendars.get('cal1')
+    assert.equal(cal.has(eventId(first.id)) && cal.has(eventId(last.id)), true)
+    assert.equal(cal.has(eventId(bad.id)), false)
+    let s = sync.status()
+    assert.deepEqual([s.failed, s.pending], [1, 0])
+    assert.match(s.error, /refused 1 task/)
+    assert.equal(logs.join('\n').includes('Invalid start time'), false) // Google's text never reaches the log or status
+
+    // Changed, it is offered again; accepted, the error clears.
+    bad.title = 'Fixed'
+    sync.queue(bad.id)
+    await until(() => cal.has(eventId(bad.id)))
+    await until(() => sync.status().error === null)
+    assert.equal(sync.status().failed, 0)
+
+    // Rate limits are not the task's fault: the run stops, the task stays pending, Sync now waits for the pause.
+    g.refuse = (method, body) => (body.summary === 'Slow' ? { status: 403, body: { error: { errors: [{ reason: 'rateLimitExceeded' }] } } } : null)
+    first.title = 'Slow'
+    sync.queue(first.id)
+    await until(() => sync.status().error)
+    s = sync.status()
+    assert.deepEqual([s.failed, s.pending], [0, 1])
+    assert.match(s.error, /403/)
+    const calls = g.calls.length
+    await sync.syncNow()
+    await sleep(150)
+    assert.equal(g.calls.length, calls)
+
+    // Any other 403 (no access to that event) is the task's own: parked.
+    sync.stop()
+    const other = syncFor(g, tasks).sync
+    g.refuse = (method, body) => (body.summary === 'Slow' ? { status: 403, body: { error: { errors: [{ reason: 'forbidden' }] } } } : null)
+    await other.connect({ refreshToken: 'rt', email: 'a@b.c' })
+    await until(() => other.status().lastSync)
+    assert.deepEqual([other.status().failed, other.status().pending], [1, 0])
+    other.stop()
+  } finally {
+    sync.stop()
+    g.close()
+  }
+})
+
+test('calendar sync: no call for an unchanged event or one never made; a burst waits at most maxWait; one calendar check', async () => {
+  const g = await fakeGoogle()
+  const tasks = new Map()
+  const task = dated(tasks, 'Same')
+  const { sync } = syncFor(g, tasks, { debounce: 100, maxWait: 300 })
+  try {
+    await sync.connect({ refreshToken: 'rt', email: 'a@b.c' })
+    await until(() => sync.status().lastSync)
+    g.calls.length = 0
+    // Touched but unchanged (as the event sees it): nothing sent.
+    sync.queue(task.id)
+    await until(() => sync.status().pending === 0)
+    // An undated task created and deleted never had an event: no DELETE.
+    const plain = { id: randomUUID(), title: 'Plain', column: 'todo', due: '' }
+    tasks.set(plain.id, plain)
+    sync.queue(plain.id)
+    tasks.delete(plain.id)
+    sync.queue(plain.id)
+    await until(() => sync.status().pending === 0)
+    assert.deepEqual(g.calls, [])
+
+    // A change every 40 ms would keep a plain debounce waiting forever: the first send comes within maxWait.
+    const began = Date.now()
+    let firstPut = 0
+    for (let i = 0; i < 15 && !firstPut; i++) {
+      task.title = `Edit ${i}`
+      sync.queue(task.id)
+      await sleep(40)
+      if (g.calls.some((c) => c.method === 'PUT')) firstPut = Date.now()
+    }
+    assert.ok(firstPut && firstPut - began < 520, `first PUT after ${firstPut - began} ms`)
+    await until(() => sync.status().pending === 0)
+    // The calendar is fetched once per connection, not before every run.
+    assert.equal(g.calls.filter((c) => c.method === 'GET' && c.path === '/calendars/cal1').length, 0)
+  } finally {
+    sync.stop()
+    g.close()
+  }
+})
+
+test('calendar sync: a Kanban calendar deleted in Google is made again with every dated task', async () => {
+  const g = await fakeGoogle()
+  const tasks = new Map()
+  const a = dated(tasks, 'A')
+  const b = dated(tasks, 'B', { due: '2026-11-05' })
+  const { sync } = syncFor(g, tasks)
+  try {
+    await sync.connect({ refreshToken: 'rt', email: 'a@b.c' })
+    await until(() => sync.status().lastSync && g.calendars.get('cal1').size === 2)
+    g.calendars.delete('cal1')
+    a.title = 'A again'
+    sync.queue(a.id)
+    await until(() => sync.status().calendarId === 'cal2' && g.calendars.get('cal2')?.size === 2 && sync.status().pending === 0)
+    assert.equal(g.calendars.get('cal2').get(eventId(b.id)).summary, 'B')
+    assert.equal(sync.status().error, null)
+  } finally {
+    sync.stop()
+    g.close()
+  }
+})
+
+test('calendar sync: reconnecting reuses the calendar, another account revokes the old grant, an old run stops', async () => {
+  const g = await fakeGoogle()
+  const tasks = new Map()
+  dated(tasks, 'One')
+  dated(tasks, 'Two')
+  const stored = []
+  const sync = calendarSync({
+    kv: { load: async () => [], put: async (k, v) => stored.push(v && JSON.parse(v)) },
+    tasks: () => tasks,
+    clientId: 'cid',
+    clientSecret: 'cs',
+    secret: SECRET,
+    boardUrl: 'http://k',
+    urls: { token: `${g.url}/token`, api: `${g.url}/calendar/v3`, revoke: `${g.url}/revoke` },
+    log: () => {},
+    timing: { debounce: 50, maxWait: 200 }
+  })
+  try {
+    await sync.connect({ refreshToken: 'rt1', email: 'a@b.c' })
+    await until(() => sync.status().lastSync)
+    await sync.disconnect()
+    assert.deepEqual(g.revoked, ['rt1'])
+    assert.deepEqual(stored.at(-1), { email: 'a@b.c', calendarId: 'cal1' })
+    assert.deepEqual([sync.status().connected, sync.status().email], [false, null])
+    await sync.connect({ refreshToken: 'rt2', email: 'a@b.c' })
+    await until(() => sync.status().lastSync)
+    assert.deepEqual([sync.status().calendarId, g.calendars.size], ['cal1', 1])
+    // The same account again (a new grant) revokes nothing: that would end the new grant as well.
+    await sync.connect({ refreshToken: 'rt3', email: 'a@b.c' })
+    await until(() => sync.status().lastSync)
+    assert.deepEqual(g.revoked, ['rt1'])
+
+    // Another account: the old grant is revoked, a calendar of its own is made, and a run still in flight
+    // for the old account stops without writing anything more or reporting an error.
+    g.delay = 150
+    tasks.forEach((t) => { t.title += '!'; sync.queue(t.id) })
+    await until(() => g.calls.some((c) => c.method === 'PUT' && c.body.summary.endsWith('!')))
+    const oldAuth = g.calls.at(-1).auth
+    const before = g.calls.length
+    await sync.connect({ refreshToken: 'rt4', email: 'z@y.x' })
+    assert.deepEqual(g.revoked, ['rt1', 'rt3'])
+    await until(() => sync.status().lastSync && sync.status().pending === 0, 4000)
+    assert.equal(g.calls.slice(before).some((c) => c.auth === oldAuth), false)
+    assert.equal(g.calls.slice(before).some((c) => c.path.startsWith('/calendars/cal1/')), false)
+    assert.deepEqual([sync.status().email, sync.status().calendarId, sync.status().error], ['z@y.x', 'cal2', null])
+    assert.equal(g.calendars.get('cal2').size, 2)
+  } finally {
+    sync.stop()
+    g.close()
+  }
+})
+
+test('calendar routes: cross-site connect refused, user choices not counted, renewal kept, Sync now at most every 30 s', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'kanban-'))
+  const g = await fakeGoogle()
+  const hooks = { tokenUrl: `${g.url}/token`, calendarUrl: `${g.url}/calendar/v3`, revokeUrl: `${g.url}/revoke` }
+  const env = { GOOGLE_CLIENT_ID: 'cid', GOOGLE_CLIENT_SECRET: 'csecret', ALLOWED_EMAILS: 'me@example.com', SESSION_SECRET: SECRET, EVENTS_FILE: join(dir, 'events.jsonl') }
+  // Two sessions with less than half their life left: each one's next use renews it.
+  const sid = Buffer.alloc(32, 3).toString('base64url')
+  const sid2 = Buffer.alloc(32, 4).toString('base64url')
+  await mkdir(join(dir, 'sessions'), { recursive: true })
+  for (const id of [sid, sid2]) {
+    await writeFile(join(dir, 'sessions', `${createHash('sha256').update(id).digest('hex')}.json`), JSON.stringify({ email: 'me@example.com', exp: Date.now() + 3600_000 }))
+  }
+  const server = await start(env, hooks)
+  const port = await listen(server)
+  const get = (path, cookie, extra = {}) => request(port, path, { headers: { cookie, ...extra } })
+  try {
+    for (const site of ['cross-site', 'same-site']) {
+      const res = await get('/auth/calendar', `sid=${sid}`, { 'sec-fetch-site': site })
+      assert.equal(res.status, 403)
+      assert.match(res.text, /Connect Google Calendar from Settings/)
+    }
+    assert.equal((await get('/auth/calendar', `sid=${sid}`, { 'sec-fetch-site': 'none' })).status, 302)
+    const begin = await get('/auth/calendar', `sid=${sid}`, { 'sec-fetch-site': 'same-origin' })
+    assert.equal(begin.status, 302)
+    const params = new URL(begin.headers.location).searchParams
+    const oauth = cookieOf(begin, 'oauth')
+    const finish = (cookie) => get(`/auth/callback?code=c&state=${params.get('state')}`, `${oauth}; ${cookie}`)
+    const claims = { iss: 'accounts.google.com', aud: 'cid', exp: Math.floor(Date.now() / 1000) + 300, nonce: params.get('nonce'), email: 'cal@gmail.com', email_verified: true }
+
+    // Unticked access, no refresh token, an unverified account: the user's choice, never a lockout.
+    for (let i = 0; i < 8; i++) {
+      g.claims = claims
+      g.grant = { scope: 'openid email', refresh_token: 'rt' }
+      assert.equal((await finish(`sid=${sid}`)).status, 400)
+      g.grant = { scope: `openid email ${CALENDAR_SCOPE}` }
+      assert.equal((await finish(`sid=${sid}`)).status, 400)
+      g.claims = { ...claims, email_verified: false }
+      assert.equal((await finish(`sid=${sid}`)).status, 400)
+    }
+
+    // Connected through a session renewed on this very response: both cookies arrive.
+    g.claims = claims
+    g.grant = { scope: `openid email ${CALENDAR_SCOPE}`, refresh_token: 'rt' }
+    const ok = await finish(`sid=${sid2}`)
+    assert.equal(ok.status, 302)
+    assert.equal(cookieOf(ok, 'sid'), `sid=${sid2}`)
+    assert.equal(cookieOf(ok, 'oauth'), 'oauth=')
+
+    const H2 = { ...H, cookie: `sid=${sid}` }
+    await until(async () => (await request(port, '/api/calendar', { headers: H2 })).json.lastSync, 5000)
+    const lists = () => g.calls.filter((c) => c.method === 'GET' && c.path.endsWith('/events')).length
+    const listed = lists()
+    const first = await request(port, '/api/calendar/sync', { method: 'POST', headers: H2 })
+    assert.equal(first.status, 202)
+    await until(() => lists() === listed + 1, 5000)
+    const second = await request(port, '/api/calendar/sync', { method: 'POST', headers: H2 })
+    assert.deepEqual([second.status, second.json.connected], [202, true])
+    await sleep(200)
+    assert.equal(lists(), listed + 1)
+  } finally {
+    server.close()
     g.close()
     await rm(dir, { recursive: true, force: true })
   }

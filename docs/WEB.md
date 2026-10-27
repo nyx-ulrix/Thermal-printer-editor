@@ -83,22 +83,45 @@ or without a Google client.
   `prompt=consent`, `include_granted_scopes=true`, `login_hint` = the session's email.
 - `/auth/callback` with that state: needs a signed-in session; the id_token is checked as for sign-in but the
   calendar account need not be in `ALLOWED_EMAILS`; the reply must carry a `refresh_token` and the calendar
-  scope (else a 400 page with "Try again" → `/auth/calendar`). Success → 302 `/?calendar=connected`. Failures
-  other than a missing session count toward the sign-in lockout.
-- `GET /api/calendar` → `{available, connected, email, calendarId, lastSync, error, pending}`;
-  `POST /api/calendar/sync` → 202 (starts a full sync); `POST /api/calendar/disconnect` → 204 (revokes the
-  grant, forgets the link; the calendar itself stays in the Google account). 409 when unavailable or not
-  connected.
+  scope (else a 400 page with "Try again" → `/auth/calendar`). Success → 302 `/?calendar=connected`, with
+  the session renewal cookie too when that request renewed the session. A failed code exchange or bad
+  id_token claims (iss/aud/nonce/exp) count toward the sign-in lockout; a missing session, unticked calendar
+  access, no refresh token or an unverified account do not (the user's own choice).
+- `GET /auth/calendar` with a `Sec-Fetch-Site` other than `same-origin` or `none` → 403 page ("Open the
+  board first"): another site cannot start a grant for the signed-in owner.
+- `GET /api/calendar` → `{available, connected, email, calendarId, lastSync, error, pending, failed}`
+  (`failed`: tasks Google refused, see below); `POST /api/calendar/sync` → 202 (starts a full sync; a second
+  call within 30 s starts nothing and just returns the status); `POST /api/calendar/disconnect` → 204
+  (revokes the grant, keeps only `{email, calendarId}`; the calendar itself stays in the Google account).
+  409 when unavailable or not connected.
 - Stored as key `google` in table `kanban_calendar` (or `DATA_DIR/calendar/`): `{email, refresh, calendarId,
   connectedAt}`, `refresh` sealed with AES-256-GCM under HKDF(`SESSION_SECRET`). A new `SESSION_SECRET`
-  means connecting again.
-- Events live in a calendar named "Kanban" that the app creates (made again if deleted). An open task with a
-  due date is the event `kb` + its UUID without dashes: all-day (`date`), or 30 min from `dueTime` in
-  `dueTz` (`dateTime` + `timeZone`); summary = title, description = notes, urgency, column and the board
-  URL; colour Tomato/Banana/Peacock for high/medium/low; transparent (never busy). Updated with PUT
-  (falls back to POST on 404); deleted when the task is done, undated or deleted. Reconcile (on boot,
-  every 6 h, on sync) deletes only events whose id is `kb` + 32 hex with no matching open dated task;
-  anything else in the calendar is never touched.
+  means connecting again. Connecting the same Google account again (after a disconnect too) reuses its
+  calendar; another account gets a new calendar, and the replaced account's refresh token is revoked first
+  (not for the same account: revoking there would end the grant just made). A non-OK revoke is logged
+  (status only).
+- Events live in a calendar named "Kanban" that the app creates. An open task with a due date is the event
+  `kb` + its UUID without dashes: all-day (`date`), or 30 min from `dueTime` in `dueTz`: start and end are
+  real instants (`dateTime` in UTC, `...Z`, plus `timeZone` for display), so the event lasts 30 minutes even
+  on a night the clocks change. A wall time repeated by a clock change means its first occurrence; one that
+  does not exist (skipped hour) moves on to the moment of the change. Summary = title, description = notes,
+  urgency, column and the board URL; colour Tomato/Banana/Peacock for high/medium/low; transparent (never
+  busy). Updated with PUT (falls back to POST on 404); deleted when the task is done, undated or deleted.
+  Reconcile (on boot, every 6 h, on sync) deletes only events whose id is `kb` + 32 hex with no matching open
+  dated task and resends every dated open task; anything else in the calendar is never touched.
+- Sending: changes go out 1.5 s after the last one, but at most 10 s after the first of a burst. The server
+  remembers (in memory) what it last sent per task and skips a PUT whose event is unchanged, and skips the
+  DELETE for a task it knows has no event (reconcile and a new calendar clear that memory). The calendar's
+  existence is checked once per connection; when an event call finds it gone (404/410), it is made again
+  and every dated open task is written to it in the same run.
+- Errors: a task Google refuses (400, 404, 409, 410, or 403 that is not a rate limit) is parked: the others
+  still sync, `failed` counts it, `error` says "Google Calendar refused N tasks", and it is offered again when
+  it changes (or at the next reconcile). Everything else stops the run and retries with backoff (5 s
+  doubling to 5 min): 401 after one token refresh, 429, rate-limit 403s (`rateLimitExceeded`,
+  `userRateLimitExceeded`, `quotaExceeded`), 5xx, timeouts and network errors; Sync now does not cut short a
+  backoff Google asked for (429 or rate-limit 403). A revoked or unreadable refresh token stops until the
+  next connect or Sync now. A reply that is not JSON gives a fixed message (no reply text in `error`). A run
+  started under one connection stops, without an error, once a disconnect or a new connect replaces it.
 
 ## Installable apps
 
@@ -125,9 +148,14 @@ down; `/api/*` and `/auth/*` are never touched. The board's CSP has `worker-src 
 Every non-GET `/api/*` and `/auth/logout` call must carry `X-Requested-With: kanban`. JSON in and out.
 Kanban routes are unchanged (`/api/stream`, `/api/tasks`, `/api/tasks/:id`, `/api/tasks/:id/print`), except:
 
-- Tasks: `{title, notes, column, urgency: low|medium|high, due: 'YYYY-MM-DD' or '', dueTime: 'HH:MM' or '',
-  dueTz: IANA zone or '', order}`. A `dueTime` without a `due` (after merging a PATCH) is 400 'Pick a due date
-  before a time'; clearing `due` clears `dueTime`. The agent's task jobs carry `urgency`, `due` and `dueTime`.
+- Tasks: `{title, notes, column, urgency: low|medium|high, due: 'YYYY-MM-DD' (years 1900 to 9998) or '',
+  dueTime: 'HH:MM' or '', dueTz: IANA zone or '', order}`. `dueTz` must be an IANA name (`Area/City` or
+  `UTC`; offsets like `+05:00` and abbreviations are refused unless they resolve to `Area/City`) and is
+  stored in its canonical form (`Intl.DateTimeFormat(...).resolvedOptions().timeZone`, e.g. `US/Eastern` →
+  `America/New_York`). A `dueTime` without a `due` (after merging a PATCH) is 400 'Pick a due date before a
+  time'; a `dueTime` without a `dueTz` is 400 'Due time needs a time zone' (on create, and on a PATCH that
+  sets either). Clearing `due` clears `dueTime`, in the route and in the event fold (so two concurrent
+  PATCHes cannot leave a time without a date). The agent's task jobs carry `urgency`, `due` and `dueTime`.
 - `/api/stream`: at most 5 open streams per account (429), 50 in all (503). A stream whose reader stops
   reading is dropped after 30 s of unsent backlog.
 - The snapshot's `jobs` holds the latest job of each task plus raw jobs requested in the last 24 h.

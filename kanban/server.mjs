@@ -6,7 +6,7 @@ import { appendFile, mkdir, open as openFile, readFile, readdir, rename, stat, t
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { dirname, extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { CALENDAR_SCOPE, GOOGLE_CALENDAR_URL, calendarSync, validZone } from './calendar.mjs'
+import { CALENDAR_SCOPE, GOOGLE_CALENDAR_URL, calendarSync, canonicalZone } from './calendar.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 export const COLUMNS = ['todo', 'doing', 'done']
@@ -22,6 +22,7 @@ const MAX_CLIENTS = 50
 const MAX_STREAMS_PER_EMAIL = 5
 const STALL_MS = 30_000
 const SESSION_MS = 7 * 24 * 3600_000
+const SYNC_NOW_GAP_MS = 30_000
 const OAUTH_MS = 600_000
 const DAY_MS = 24 * 3600_000
 const EXPIRE_RAW_MS = 3600_000
@@ -63,7 +64,11 @@ export function apply(state, { type, data, ts }) {
       break
     case 'task.updated': {
       const task = state.tasks.get(data.id)
-      if (task) Object.assign(task, data, { updated: ts })
+      if (task) {
+        Object.assign(task, data, { updated: ts })
+        // No time without a date, whatever order two edits landed in.
+        if (!task.due && task.dueTime) task.dueTime = ''
+      }
       break
     }
     case 'task.deleted':
@@ -167,7 +172,8 @@ export function validTask(body, partial = false) {
     const due = body.due ?? ''
     const [y, m, d] = typeof due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(due) ? due.split('-').map(Number) : []
     const real = y && new Date(Date.UTC(y, m - 1, d)).toISOString().startsWith(due)
-    if (due !== '' && !real) throw new HttpError(400, 'due must be a date as YYYY-MM-DD, or empty')
+    // Google Calendar takes years 1900-9998 only (an all-day event ends the next day).
+    if (due !== '' && !(real && y >= 1900 && y <= 9998)) throw new HttpError(400, 'due must be a date as YYYY-MM-DD (years 1900 to 9998), or empty')
     out.due = due
   }
   if (body.dueTime !== undefined) {
@@ -180,9 +186,11 @@ export function validTask(body, partial = false) {
   }
   if (body.dueTz !== undefined) {
     // The zone the time is meant in (the browser's), so the calendar event lands at the right instant.
+    // Stored by its canonical IANA name: offsets and abbreviations are refused, as Google refuses them.
     const dueTz = body.dueTz ?? ''
-    if (dueTz !== '' && !validZone(dueTz)) throw new HttpError(400, 'dueTz must be a time zone name like Asia/Singapore, or empty')
-    out.dueTz = dueTz
+    const zone = dueTz === '' ? '' : canonicalZone(dueTz)
+    if (zone === null) throw new HttpError(400, 'dueTz must be a time zone name like Asia/Singapore, or empty')
+    out.dueTz = zone
   }
   if (body.order !== undefined) {
     if (typeof body.order !== 'number' || !Number.isFinite(body.order)) throw new HttpError(400, 'order must be a number')
@@ -899,7 +907,8 @@ export async function start(env = process.env, hooks = {}) {
     broker.subscribe('tasks', ({ data }) => sync.queue(data.id))
   }
   const calendarStatus = () =>
-    sync ? { available: true, ...sync.status() } : { available: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0 }
+    sync ? { available: true, ...sync.status() } : { available: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0, failed: 0 }
+  let lastSyncNow = -Infinity
 
   // ---- printer + resources (ephemeral topics) ----
   let agent = null // { lastSeen, stats, printer }
@@ -1033,6 +1042,11 @@ export async function start(env = process.env, hooks = {}) {
     return `${cookieName(site, name)}=${value}; HttpOnly;${site.secure ? ' Secure;' : ''} SameSite=Lax; Path=${path}; Max-Age=${maxAge}`
   }
   const oauthPath = (site) => (site.secure ? '/' : '/auth')
+  /** Adds a cookie without dropping one already set on this response (a session renewal). */
+  function addCookie(res, cookie) {
+    const set = res.getHeader('Set-Cookie')
+    res.setHeader('Set-Cookie', [...(set === undefined ? [] : [set].flat()), cookie])
+  }
 
   /** The signed-in email, renewing the session when less than half its life is left. */
   function signedIn(req, res, site) {
@@ -1120,7 +1134,7 @@ export async function start(env = process.env, hooks = {}) {
       if (counts) signInFailures.fail(ip)
       // Quoted: parts of `why` come from the request or from Google. Tokens never go into `why`.
       if (why) console.warn(`${calendar ? 'Calendar connect' : 'Sign-in'} failed: ${JSON.stringify(why)}`)
-      res.setHeader('Set-Cookie', clearOauth)
+      addCookie(res, clearOauth)
       if (calendar) return sendPage(res, 400, 'Calendar not connected', 'Connecting Google Calendar did not complete. It may have been cancelled or taken too long.', again, 'Try again')
       sendPage(res, 400, 'Sign-in failed', 'Google sign-in did not complete. It may have been cancelled or taken too long.', again, 'Try again')
     }
@@ -1195,14 +1209,14 @@ export async function start(env = process.env, hooks = {}) {
       .end()
   }
 
+  // The user's own choices (an unverified account, unticked access) are not guesses: no lockout count.
   async function connectCalendar(res, ip, clearOauth, email, verified, granted, fail) {
-    if (!verified) return fail('calendar account email not verified')
+    if (!verified) return fail('calendar account email not verified', false)
     const scopes = typeof granted.scope === 'string' ? granted.scope.split(' ') : []
     if (typeof granted.refresh_token !== 'string' || !granted.refresh_token || !scopes.includes(CALENDAR_SCOPE)) {
       // The consent screen lets the user untick calendar access; then there is nothing to sync with.
-      signInFailures.fail(ip)
       console.warn('Calendar connect failed: Google did not grant calendar access')
-      res.setHeader('Set-Cookie', clearOauth)
+      addCookie(res, clearOauth)
       return sendPage(res, 400, 'Calendar not connected', 'Google did not grant calendar access. Tick the calendar permission on the Google screen.', '/auth/calendar', 'Try again')
     }
     try {
@@ -1211,13 +1225,20 @@ export async function start(env = process.env, hooks = {}) {
       return fail(`saving the calendar link: ${error.message}`, false)
     }
     signInFailures.clear(ip)
-    res.writeHead(302, { Location: '/?calendar=connected', 'Set-Cookie': clearOauth, 'Cache-Control': 'no-store' }).end()
+    // Beside any session renewal signedIn() set on this response.
+    addCookie(res, clearOauth)
+    res.writeHead(302, { Location: '/?calendar=connected', 'Cache-Control': 'no-store' }).end()
   }
 
   /** `/auth/calendar`: the board owner grants calendar access (kanban host, signed in). */
   function calendarLogin(req, res, site) {
     if (site.editor) throw new HttpError(404, 'Not found')
     if (!sync) return sendPage(res, 404, 'Calendar unavailable', 'Google Calendar sync needs Google sign-in configured on this server.', '/', 'Back to the board')
+    // Only from the board itself (or typed in): another site must not start a grant for the signed-in owner.
+    const fetchSite = req.headers['sec-fetch-site']
+    if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') {
+      return sendPage(res, 403, 'Open the board first', 'Connect Google Calendar from Settings on the board.', '/', 'Back to the board')
+    }
     const email = signedIn(req, res, site)
     if (!email) return res.writeHead(302, { Location: '/auth/login?return=/', 'Cache-Control': 'no-store' }).end()
     // offline + consent: Google returns a refresh token every time, even for an account that granted before.
@@ -1447,6 +1468,9 @@ export async function start(env = process.env, hooks = {}) {
     if (pathname === '/api/calendar/sync' && method === 'POST') {
       if (!sync) throw new HttpError(409, 'Google Calendar sync is not available on this server')
       if (!sync.status().connected) throw new HttpError(409, 'Connect Google Calendar first')
+      // A full sync costs a Google call per dated task: one every 30 s at most; more just report.
+      if (Date.now() - lastSyncNow < SYNC_NOW_GAP_MS) return sendJson(res, 202, calendarStatus())
+      lastSyncNow = Date.now()
       // Started, not awaited: Google may be slow; the board reads the outcome from GET /api/calendar.
       sync.syncNow().catch(warn('Calendar sync'))
       return sendJson(res, 202, calendarStatus())
@@ -1526,6 +1550,7 @@ export async function start(env = process.env, hooks = {}) {
       const orders = [...state.tasks.values()].filter((t) => t.column === column).map((t) => t.order)
       const task = { id: randomUUID(), notes: '', color: 'red', urgency: 'medium', due: '', dueTime: '', dueTz: '', ...input, column, order: Math.max(0, ...orders) + 1 }
       if (!task.due && task.dueTime) throw new HttpError(400, 'Pick a due date before a time')
+      if (task.dueTime && !task.dueTz) throw new HttpError(400, 'Due time needs a time zone')
       await broker.publish('tasks', 'task.created', task)
       return sendJson(res, 201, state.tasks.get(task.id))
     }
@@ -1557,6 +1582,10 @@ export async function start(env = process.env, hooks = {}) {
           if (changes.dueTime) throw new HttpError(400, 'Pick a due date before a time')
           // Clearing the date clears its time too.
           if (merged.dueTime) changes.dueTime = ''
+        }
+        // Checked when the time or zone is set, so tasks saved before this rule can still be edited.
+        if ((changes.dueTime !== undefined || changes.dueTz !== undefined) && merged.due && merged.dueTime && !merged.dueTz) {
+          throw new HttpError(400, 'Due time needs a time zone')
         }
         await broker.publish('tasks', 'task.updated', { id, ...changes })
         return sendJson(res, 200, state.tasks.get(id))
