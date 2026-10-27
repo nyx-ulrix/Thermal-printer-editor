@@ -18,6 +18,8 @@ const MAX_BACKOFF_MS = 5 * 60_000
 const KEY = 'google'
 // Google event colours: Tomato, Banana, Peacock
 const COLOUR = { high: '11', medium: '5', low: '7' }
+/** Google Calendar's event colour ids, '1' (Lavender) to '11' (Tomato); '' colours each event by its urgency. */
+export const validColour = (c) => c === '' || /^([1-9]|1[01])$/.test(c)
 const URGENCY_NAME = { high: 'High', medium: 'Medium', low: 'Low' }
 const COLUMN_NAME = { todo: 'To do', doing: 'Doing' }
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -80,7 +82,7 @@ export function wallToInstant(day, time, zone) {
 const utc = (ms) => new Date(ms).toISOString().slice(0, 19) + 'Z'
 
 /** The event a task becomes, or null when it has none: no due date, or done. */
-export function eventFor(task, boardUrl) {
+export function eventFor(task, boardUrl, colour = '') {
   if (!task || typeof task.due !== 'string' || !DAY_RE.test(task.due) || task.column === 'done') return null
   const urgency = COLOUR[task.urgency] ? task.urgency : 'medium'
   const zone = TIME_RE.test(task.dueTime ?? '') && canonicalZone(task.dueTz)
@@ -93,7 +95,7 @@ export function eventFor(task, boardUrl) {
     description: [task.notes, `Urgency: ${URGENCY_NAME[urgency]} · ${COLUMN_NAME[task.column] ?? 'To do'}`, boardUrl].filter(Boolean).join('\n\n'),
     start: zone ? { dateTime: utc(start), timeZone: zone } : { date: task.due },
     end: zone ? { dateTime: utc(start + EVENT_MINUTES * 60_000), timeZone: zone } : { date: nextDay(task.due) },
-    colorId: COLOUR[urgency],
+    colorId: validColour(colour) && colour ? colour : COLOUR[urgency],
     transparency: 'transparent', // a due date is not a meeting: it never shows the day as busy
     status: 'confirmed',
     source: { title: 'Kanban', url: boardUrl }
@@ -255,7 +257,7 @@ export function calendarSync({ kv, tasks, clientId, clientSecret, secret, boardU
 
   async function syncTask(cal, taskId) {
     const base = `/calendars/${encodeURIComponent(cal)}/events`
-    const event = eventFor(tasks().get(taskId), boardUrl)
+    const event = eventFor(tasks().get(taskId), boardUrl, record?.colour)
     if (!event) {
       // Never made, or already deleted: nothing to ask Google.
       if (sent.get(taskId) === null || (reconciled && !sent.has(taskId))) return
@@ -420,7 +422,7 @@ export function calendarSync({ kv, tasks, clientId, clientSecret, secret, boardU
       const same = record?.email === email
       const old = connected() && crypt.open(record.refresh)
       reset()
-      record = { email, refresh: crypt.seal(refreshToken), calendarId: same ? record.calendarId ?? null : null, connectedAt: Date.now() }
+      record = { email, refresh: crypt.seal(refreshToken), calendarId: same ? record.calendarId ?? null : null, colour: record?.colour ?? '', connectedAt: Date.now() }
       await save()
       // The replaced account's grant would otherwise stay live at Google. Not for the same account: revoking
       // there would also end the grant just made.
@@ -432,9 +434,19 @@ export function calendarSync({ kv, tasks, clientId, clientSecret, secret, boardU
     async disconnect() {
       const refresh = connected() && crypt.open(record.refresh)
       reset()
-      record = record?.email ? { email: record.email, calendarId: record.calendarId ?? null } : null
+      record = record?.email ? { email: record.email, calendarId: record.calendarId ?? null, colour: record.colour ?? '' } : null
       await save()
       if (refresh) await revoke(refresh)
+    },
+    /** The colour of every event ('' = by urgency); the events already in Google are recoloured. */
+    async setColour(colour) {
+      if (!validColour(colour)) throw new Error('unknown colour')
+      if (!record) return
+      record.colour = colour
+      await save()
+      if (!connected()) return
+      reconcileDue = true
+      if (!running && !backoff && !stalled) schedule(0)
     },
     /** Sync everything now (Settings -> Sync now). Google's own request to slow down is kept. */
     syncNow() {
@@ -456,6 +468,7 @@ export function calendarSync({ kv, tasks, clientId, clientSecret, secret, boardU
         error: status.error,
         pending: pending.size,
         failed: failed.size,
+        colour: record?.colour ?? '',
         reconnect: on && stalled // the stored access no longer works: only connecting again heals it
       }
     },

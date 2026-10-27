@@ -6,7 +6,7 @@ import { appendFile, mkdir, open as openFile, readFile, readdir, rename, stat, t
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { dirname, extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { CALENDAR_SCOPE, GOOGLE_CALENDAR_URL, calendarSync, canonicalZone } from './calendar.mjs'
+import { CALENDAR_SCOPE, GOOGLE_CALENDAR_URL, calendarSync, canonicalZone, validColour } from './calendar.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 export const COLUMNS = ['todo', 'doing', 'done']
@@ -1505,6 +1505,14 @@ export async function start(env = process.env, hooks = {}) {
       // Started, not awaited: Google may be slow; the board reads the outcome from GET /api/calendar.
       sync.syncNow().catch(warn('Calendar sync'))
       return sendJson(res, 202, calendarStatus())
+    }
+    if (pathname === '/api/calendar/colour' && method === 'POST') {
+      if (!sync) throw new HttpError(409, 'Google Calendar sync is not available on this server')
+      if (!sync.status().connected) throw new HttpError(409, 'Connect Google Calendar first')
+      const { colour } = await readJson(req)
+      if (typeof colour !== 'string' || !validColour(colour)) throw new HttpError(400, 'Unknown colour')
+      await sync.setColour(colour)
+      return sendJson(res, 200, calendarStatus())
     }
     if (pathname === '/api/calendar/disconnect' && method === 'POST') {
       if (!sync) throw new HttpError(409, 'Google Calendar sync is not available on this server')

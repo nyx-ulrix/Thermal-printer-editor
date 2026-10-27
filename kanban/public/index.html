@@ -91,6 +91,10 @@ fieldset.field legend{margin-bottom:6px;padding:0}
 .dot::after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--c);transform:translate(2px,-2px);mix-blend-mode:multiply;opacity:.92}
 .ink-opt input:checked+.dot{box-shadow:0 0 0 2px var(--paper),0 0 0 4px var(--ink)}
 .ink-opt input:focus-visible+.dot{outline:3px solid var(--blue);outline-offset:5px}
+/* Google Calendar event colour: Google's own 11 colours, or one per urgency */
+.gcols{display:flex;flex-wrap:wrap;gap:6px 10px}
+.gcols .dot{width:24px;height:24px}
+.gcols .dot.split::after{background:conic-gradient(#d50000 0 120deg,#f6bf26 0 240deg,#039be5 0)}
 
 /* due date picker: the browser's own calendar cannot take the board's look */
 .date{position:relative}
@@ -1726,6 +1730,31 @@ function syncedAt(ms) {
   const d = new Date(ms)
   return localDay(d) === localDay() ? hhmm(ms) : d.toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 }
+// Google Calendar's event colours by colorId, as Google shows them; '' colours each event by urgency
+const GCOLOURS = [['', 'By urgency', ''], ['1', 'Lavender', '#7986cb'], ['2', 'Sage', '#33b679'], ['3', 'Grape', '#8e24aa'],
+  ['4', 'Flamingo', '#e67c73'], ['5', 'Banana', '#f6bf26'], ['6', 'Tangerine', '#f4511e'], ['7', 'Peacock', '#039be5'],
+  ['8', 'Graphite', '#616161'], ['9', 'Blueberry', '#3f51b5'], ['10', 'Basil', '#0b8043'], ['11', 'Tomato', '#d50000']]
+function colourPicker(current) {
+  return h('fieldset', { class: 'field' }, h('legend', { class: 'label' }, 'Event colour'),
+    h('div', { class: 'gcols' }, GCOLOURS.map(([id, name, hex]) => {
+      const dot = h('span', { class: hex ? 'dot' : 'dot split', 'aria-hidden': 'true' })
+      if (hex) dot.style.setProperty('--c', hex)
+      else dot.style.setProperty('--c', '#f6bf26')
+      return h('label', { class: 'ink-opt', title: name },
+        h('input', { type: 'radio', name: 'gcol', value: id, checked: id === current, disabled: cal.busy, 'data-ck': `col${id}`, onchange: () => setCalColour(id) }),
+        dot, h('span', { class: 'sr' }, name))
+    })))
+}
+async function setCalColour(colour) {
+  cal.busy = true; cal.error = ''
+  try {
+    const r = await api('POST', '/api/calendar/colour', { colour })
+    if (r && typeof r === 'object' && 'connected' in r) cal.status = r
+    toast('Calendar colour saved. Events update shortly.')
+  } catch (e) { if (!e.quiet) cal.error = e.message }
+  cal.busy = false
+  renderCal(`col${colour}`)
+}
 function renderCal(focus) {
   const s = cal.status, body = $('#gcal-body')
   const parts = []
@@ -1748,6 +1777,7 @@ function renderCal(focus) {
       Number(s.pending) > 0 ? `, ${s.pending} ${Number(s.pending) === 1 ? 'change' : 'changes'} waiting` : ''))
     if (s.error) parts.push(h('p', { class: 'err' }, s.error))
     if (cal.error) parts.push(h('p', { class: 'err' }, cal.error))
+    parts.push(colourPicker(s.colour ?? ''))
     if (cal.confirm) {
       const keep = () => { cal.confirm = false; renderCal('disconnect') }
       const row = h('div', { class: 'row', role: 'group', 'aria-label': 'Confirm disconnect Google Calendar' },

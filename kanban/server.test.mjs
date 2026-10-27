@@ -1135,6 +1135,10 @@ test('calendar events: all day, timed with zone, none when done or undated', () 
   assert.deepEqual(ny('2026-11-01', '00:45'), ['2026-11-01T04:45:00Z', '2026-11-01T05:15:00Z'])
   // An old task with a zone in another spelling is sent by its canonical name.
   assert.equal(eventFor({ ...base, dueTime: '10:00', dueTz: 'asia/singapore' }, 'u').start.timeZone, 'Asia/Singapore')
+  // one colour for every event, or (default) the urgency's
+  assert.equal(eventFor(base, 'u', '3').colorId, '3')
+  assert.equal(eventFor(base, 'u', '').colorId, eventFor(base, 'u').colorId)
+  assert.equal(eventFor(base, 'u', '12').colorId, eventFor(base, 'u').colorId)
   // A time without a usable zone stays all day rather than guessing one.
   assert.deepEqual(eventFor({ ...base, dueTime: '10:00', dueTz: 'Nowhere/Land' }, 'u').start, { date: '2026-12-31' })
   assert.equal(eventFor({ ...base, column: 'done' }, 'u'), null)
@@ -1225,7 +1229,7 @@ test('google calendar: connect through the sign-in callback, events follow tasks
     const sid = cookieOf(signed, 'sid')
     const H2 = { ...H, cookie: sid }
     const api = (method, path, body) => request(port, path, { method, headers: H2, body })
-    assert.deepEqual((await api('GET', '/api/calendar')).json, { available: true, atSignIn: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0, failed: 0, reconnect: false })
+    assert.deepEqual((await api('GET', '/api/calendar')).json, { available: true, atSignIn: false, connected: false, email: null, calendarId: null, lastSync: null, error: null, pending: 0, failed: 0, colour: "", reconnect: false })
     assert.equal((await request(port, '/api/calendar')).status, 401)
     assert.equal((await request(port, '/api/calendar/disconnect', { method: 'POST', headers: { cookie: sid } })).status, 403)
     assert.equal((await api('POST', '/api/calendar/sync')).status, 409)
@@ -1293,6 +1297,14 @@ test('google calendar: connect through the sign-in callback, events follow tasks
     assert.deepEqual(g.calls.filter((x) => x.path.includes('/events')).map((x) => `${x.method} ${x.path}`), [`PUT /calendars/cal1/events/${eid}`, 'POST /calendars/cal1/events'])
     assert.deepEqual(g.calls.at(-1).body.start, { date: '2026-11-03' })
 
+    // One colour for every event: the events already in Google are recoloured; back to by urgency after.
+    assert.equal((await api('POST', '/api/calendar/colour', { colour: '12' })).status, 400)
+    assert.equal((await api('POST', '/api/calendar/colour', { colour: 3 })).status, 400)
+    assert.equal((await api('POST', '/api/calendar/colour', { colour: '3' })).json.colour, '3')
+    await until(() => g.calendars.get('cal1').get(eid).colorId === '3' && g.calendars.get('cal1').get(eventId(early.id)).colorId === '3', 5000)
+    assert.equal((await api('POST', '/api/calendar/colour', { colour: '' })).json.colour, '')
+    await until(() => g.calendars.get('cal1').get(eid).colorId === '11', 5000)
+
     // Hand-made events, and ids that only look like ours, are never touched; a stale event of ours goes.
     const cal = g.calendars.get('cal1')
     const stale = `kb${'a'.repeat(32)}`
@@ -1331,7 +1343,7 @@ test('google calendar: connect through the sign-in callback, events follow tasks
     status = (await api('GET', '/api/calendar')).json
     assert.deepEqual([status.connected, status.email], [false, null])
     // Only the account and its calendar stay, so connecting it again reuses that calendar.
-    assert.deepEqual(JSON.parse(await readFile(join(dir, 'calendar', 'google.json'), 'utf8')), { email: 'cal@gmail.com', calendarId: 'cal1' })
+    assert.deepEqual(JSON.parse(await readFile(join(dir, 'calendar', 'google.json'), 'utf8')), { email: 'cal@gmail.com', calendarId: 'cal1', colour: '' })
     assert.equal((await api('POST', '/api/calendar/sync')).status, 409)
   } finally {
     server.close()
@@ -1544,7 +1556,7 @@ test('calendar sync: reconnecting reuses the calendar, another account revokes t
     await until(() => sync.status().lastSync)
     await sync.disconnect()
     assert.deepEqual(g.revoked, ['rt1'])
-    assert.deepEqual(stored.at(-1), { email: 'a@b.c', calendarId: 'cal1' })
+    assert.deepEqual(stored.at(-1), { email: 'a@b.c', calendarId: 'cal1', colour: '' })
     assert.deepEqual([sync.status().connected, sync.status().email], [false, null])
     await sync.connect({ refreshToken: 'rt2', email: 'a@b.c' })
     await until(() => sync.status().lastSync)
