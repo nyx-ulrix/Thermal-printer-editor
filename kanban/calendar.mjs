@@ -214,7 +214,11 @@ export function calendarSync({ kv, tasks, clientId, clientSecret, secret, boardU
       if (res.status === 401 && attempt === 0) { access = null; continue }
       if (!res.ok) {
         const rate = res.status === 429 || (res.status === 403 && RATE_RE.test(text))
-        throw Object.assign(new Error(`${method} ${path.split('?')[0]} ${res.status}`), { status: res.status, rate })
+        // Google's reason code (e.g. accessNotConfigured, insufficientPermissions) says what to fix; never the body itself
+        let why = ''
+        try { const e = JSON.parse(text).error; why = e.errors?.[0]?.reason || e.status || '' } catch {}
+        why = /^[A-Za-z_]{1,48}$/.test(why) ? ` ${why}` : ''
+        throw Object.assign(new Error(`${method} ${path.split('?')[0]} ${res.status}${why}`), { status: res.status, rate })
       }
       try {
         return text ? JSON.parse(text) : null
