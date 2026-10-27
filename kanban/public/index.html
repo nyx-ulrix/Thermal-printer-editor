@@ -82,7 +82,7 @@ a.big,a.link{color:inherit;display:inline-block}
 .err:empty{display:none}
 
 /* ink swatches (radio) */
-.swatches{display:grid;grid-template-columns:repeat(2,max-content);gap:8px 22px}
+.swatches{display:grid;grid-template-columns:repeat(3,max-content);gap:8px 18px}
 fieldset.field legend{margin-bottom:6px;padding:0}
 .ink-opt{position:relative;display:inline-flex;align-items:center;gap:7px;cursor:pointer;font:700 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;padding:4px 0}
 .ink-opt input{position:absolute;opacity:0;width:1px;height:1px}
@@ -316,6 +316,7 @@ body.locked{overflow:hidden}
 /* move arrows: side by side the columns are reached by dragging, so the arrows show only to the keyboard
    (a card with focus inside); stacked they point up and down */
 .mv .g-stack{display:none}
+.qmove{display:none}
 @media (min-width:821px){
   .card .actions .btn.mv{display:none}
   .card:focus-within .actions .btn.mv{display:inline-flex}
@@ -328,7 +329,13 @@ body.locked{overflow:hidden}
   .card:not(.editing) > :is(.notes,.job,.actions){display:none}
   .card .open::after{content:"";position:absolute;inset:0;z-index:1}
   .card .open:hover{text-decoration:none}
-  .card .title{font-size:15px;line-height:1.3}
+  .card .title{font-size:15px;line-height:1.3;display:flex;align-items:flex-start;gap:4px}
+  .card .title .open{flex:1;min-width:0}
+  /* bare arrows (no box) above the stretched title button, 42 px to tap */
+  .card .qmove{display:flex;position:relative;z-index:2;margin:-10px -10px -10px 0}
+  .qmove button{appearance:none;background:none;border:0;padding:0;width:42px;height:42px;display:grid;place-items:center;color:inherit;cursor:pointer}
+  .qmove .icon{width:22px;height:22px}
+  .qmove button:focus-visible{outline:3px solid var(--blue);outline-offset:-4px}
   .cards{gap:14px}
   .grip{display:none!important}
 }
@@ -1518,6 +1525,12 @@ function buildCard(t) {
       // print view: the title button shows the printed label instead of the title text
       const art = ui.printView ? labelArt(t) : null
       return [h('button', { class: 'open', type: 'button', 'data-fk': fk('open'), 'aria-label': `Edit "${t.title}"`, title: 'Edit', 'aria-describedby': art?.desc.id }, art ? art.cv : t.title), art?.desc]
+    })(),
+    // phone only: bare up/down arrows beside the title, so a card moves without opening the sheet
+    (() => {
+      const ci = COLS.findIndex((x) => x.id === colOf(t)), prev = COLS[ci - 1], next = COLS[ci + 1]
+      const arrow = (to, dir, key, icon) => to && h('button', { type: 'button', 'data-fk': fk(key), 'aria-label': `Move "${t.title}" to ${to.name}`, title: `Move to ${to.name}`, onclick: () => move(t, dir) }, ico(icon))
+      return h('span', { class: 'qmove' }, arrow(prev, -1, 'qup', 'up'), arrow(next, 1, 'qdown', 'down'))
     })()))
   li.addEventListener('click', (e) => {
     // never after a drag, never from the card's own controls, never when the click ends a text selection
@@ -1657,7 +1670,7 @@ function renderBoard() {
   if (fk && document.activeElement?.dataset?.fk !== fk) {
     // the button may be gone (a card moved into the last column loses its right arrow): try its neighbours
     const id = fk.slice(0, fk.lastIndexOf(':'))
-    for (const a of [fk, `${id}:left`, `${id}:right`, `${id}:print`]) {
+    for (const a of [fk, `${id}:qdown`, `${id}:qup`, `${id}:left`, `${id}:right`, `${id}:print`]) {
       const el = document.querySelector(`[data-fk="${CSS.escape(a)}"]`)
       if (el) { el.focus(); break }
     }
