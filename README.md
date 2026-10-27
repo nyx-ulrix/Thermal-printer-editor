@@ -98,11 +98,14 @@ https://kanban.liewjiaen.com is a three-column board (**To do**, **Doing**, **Do
 
 - **Cards** have a title (up to 140 characters), optional notes (up to 1000), an urgency (low, medium or high) and an optional due date. Add them with the New task form; edit or delete them on the card (delete asks to confirm).
 - **Colours:** a band across the top of each card shows its urgency (low teal, medium yellow, high red) and its due date: "Due today", "Due tomorrow", the date, or **OVERDUE** once it has passed (not in Done). The card itself takes its column's colour: To do pale red, Doing pale yellow, Done pale blue.
-- **Moving cards:** drag them (by the dotted handle on touch screens) or use the arrow buttons.
+- **Moving cards:** drag them to another column or use the arrow buttons. On a phone, hold a card for a moment (or press its dotted handle) to pick it up; the page scrolls when your finger nears the top or bottom edge.
+- **Order:** within a column, cards sort by due date (soonest first, no date last), then by urgency (high first).
+- **Folding columns:** tap a column's name to fold it away; Done starts folded. Each browser remembers your choice.
+- **Due dates** are picked from a calendar in the board's own style, usable by keyboard (arrows move by day and week, Page Up/Down by month, Enter picks, Escape closes).
 - **Print** on a card queues a label for it. One label per task waits at a time: pressing Print again while one is queued returns the same job instead of queuing another.
 - **Live updates:** every open board sees changes instantly over Server-Sent Events; the board reconnects by itself after a drop.
-- **Label printer:** the bar at the bottom of the page shows READY, or INACTIVE with the reason (agent offline, device missing). Print buttons read *Queue print* while it is inactive; the label waits and prints when the printer is back.
-- **Settings** (header button): your account (the signed-in email and Sign out) and the resource monitor, where the print agent's machine reports CPU, memory, disk, load, temperature and uptime with every poll (a NO AGENT stamp when it has stopped reporting).
+- **Printer dot:** next to LIVE in the header, PRINTER has a teal dot when the printer is ready and a red one when it is down. Clicking it opens the details. Print buttons read *Queue print* while it is down; the label waits and prints when the printer is back.
+- **Settings** (header button): your account (the signed-in email and Sign out), and a *Printer and resources* dropdown with the printer state and its reason, plus the resource monitor: the print agent's machine reports CPU, memory, disk, load, temperature and uptime with every poll (a NO AGENT stamp when it has stopped reporting).
 - **Label editor link** in the header signs you in to the editor with the same Google account.
 
 ## How printing works
