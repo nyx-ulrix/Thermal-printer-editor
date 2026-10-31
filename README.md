@@ -208,6 +208,7 @@ SERVER_URL=http://localhost:4173 AGENT_TOKEN=dev-token PRINTER=/tmp/label.prn ST
 |---|---|---|
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | yes | Google OAuth web client. Authorized redirect URIs: `<KANBAN_ORIGIN>/auth/callback` and `<EDITOR_ORIGIN>/auth/callback`. |
 | `ALLOWED_EMAILS` | yes | Comma-separated Google accounts allowed in (case-insensitive). |
+| `PRINT_EMAILS` | no | Comma-separated Google accounts that may print, from the board and from the label editor. Others can still use the board, but get no Print button and the server refuses their print requests (403). Unset means everyone in `ALLOWED_EMAILS` may print. |
 | `SESSION_SECRET` | yes | At least 32 characters (`openssl rand -hex 32`). Signs the short-lived sign-in cookie. |
 | `AGENT_TOKEN` | yes | The print agent's token, at least 32 characters. The same value goes in the agent's env file. |
 | `KANBAN_ORIGIN`, `EDITOR_ORIGIN` | in production | Public origins, e.g. `https://kanban.liewjiaen.com`. Default `http://kanban.localhost:$PORT` and `http://printer-editor.localhost:$PORT`. |

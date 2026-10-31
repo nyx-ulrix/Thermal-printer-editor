@@ -764,8 +764,10 @@ function showLogin(msg = '') {
   $('#login-msg').textContent = msg
   if (msg) $('#signin').focus() // after a sign-out or lost session, not on first load
 }
+let canPrint = true // the server says no for accounts outside PRINT_EMAILS; the button just follows
 function setMe(me) {
   const email = typeof me?.email === 'string' ? me.email : ''
+  canPrint = me?.canPrint !== false
   $('#who-email').textContent = email
   $('#who').hidden = !email
   let editor = null
@@ -1495,7 +1497,7 @@ function actionRow(t, c) {
   // side by side the next column is to the right; stacked (phone, and the sheet) it is below. CSS shows one glyph.
   const glyph = (side, stack) => (c.where === 'sheet' ? ico(stack) : [ico(side, 'g-side'), ico(stack, 'g-stack')])
   return h('div', { class: 'actions' },
-    h('button', { class: 'btn solid ic', type: 'button', ...mark('print'), disabled: busy,
+    canPrint && h('button', { class: 'btn solid ic', type: 'button', ...mark('print'), disabled: busy,
       'aria-label': busy ? `Sending ${q}` : `${ready ? 'Print' : 'Queue print for'} ${q}`,
       title: busy ? 'Sending' : ready ? 'Print' : 'Queue print: prints when the printer is back',
       'aria-describedby': ready ? null : 'pill-why', onclick: () => printTask(t.id) }, ico(busy ? 'busy' : ready ? 'print' : 'queue')),

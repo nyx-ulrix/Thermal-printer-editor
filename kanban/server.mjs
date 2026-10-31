@@ -741,6 +741,8 @@ function limiter() {
 
 // ---------- the app ----------
 
+const NO_PRINT = 'This account cannot print. Only the owner\'s Google account can.'
+
 /** `hooks` is for tests only (a stand-in token endpoint); it cannot come from the environment. */
 export async function start(env = process.env, hooks = {}) {
   const agentToken = env.AGENT_TOKEN ?? ''
@@ -748,6 +750,9 @@ export async function start(env = process.env, hooks = {}) {
   const clientId = env.GOOGLE_CLIENT_ID ?? ''
   const clientSecret = env.GOOGLE_CLIENT_SECRET ?? ''
   const allowed = new Set((env.ALLOWED_EMAILS ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean))
+  // Who may print (task labels and editor labels); unset = everyone who may sign in.
+  const printers = new Set((env.PRINT_EMAILS ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean))
+  const mayPrint = (email) => !printers.size || printers.has(email)
   const secret = env.SESSION_SECRET ?? ''
   const port = Number(env.PORT) || 4173
   const kanbanOrigin = new URL(env.KANBAN_ORIGIN || `http://kanban.localhost:${port}`).origin
@@ -1485,7 +1490,7 @@ export async function start(env = process.env, hooks = {}) {
     const email = signedIn(req, res, site)
     if (!email) throw new HttpError(401, 'Sign in first')
 
-    if (pathname === '/api/me' && method === 'GET') return sendJson(res, 200, { email, kanbanUrl: kanbanOrigin, editorUrl: editorOrigin })
+    if (pathname === '/api/me' && method === 'GET') return sendJson(res, 200, { email, canPrint: mayPrint(email), kanbanUrl: kanbanOrigin, editorUrl: editorOrigin })
     if (pathname === '/api/stream' && method === 'GET') {
       // Lax cookies reach here from sibling subdomains; only the board itself may hold streams.
       const fetchSite = req.headers['sec-fetch-site']
@@ -1547,6 +1552,7 @@ export async function start(env = process.env, hooks = {}) {
 
     // ---- printing ----
     if (pathname === '/api/editor/print' && method === 'POST') {
+      if (!mayPrint(email)) throw new HttpError(403, NO_PRINT)
       const body = await readJson(req, MAX_EDITOR_BODY)
       const input = validRawPrint(body)
       // An optional client-made jobId makes a retried request idempotent.
@@ -1599,6 +1605,7 @@ export async function start(env = process.env, hooks = {}) {
       const [, id, print] = match
       if (!state.tasks.has(id)) throw new HttpError(404, 'No such task')
       if (print && method === 'POST') {
+        if (!mayPrint(email)) throw new HttpError(403, NO_PRINT)
         // One waiting label per task: pressing Print again while it waits returns that job.
         // Presses that arrive while the first is still being appended get its job too.
         if (taskPrinting.has(id)) return sendJson(res, 200, await taskPrinting.get(id))

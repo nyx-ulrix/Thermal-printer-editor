@@ -212,7 +212,7 @@ test('google sign-in: redirect, callback, allow list, state, server-side session
     assert.match(sidLine, /HttpOnly; Secure; SameSite=Lax; Path=\/; Max-Age=604800/)
     const sid = cookieOf(done, '__Host-sid')
     const me = await request(port, '/api/me', { headers: { cookie: sid } })
-    assert.deepEqual(me.json, { email: 'me@example.com', kanbanUrl: 'https://kanban.example.com', editorUrl: 'https://editor.example.com' })
+    assert.deepEqual(me.json, { email: 'me@example.com', canPrint: true, kanbanUrl: 'https://kanban.example.com', editorUrl: 'https://editor.example.com' })
     // A fresh session is not renewed on use.
     assert.equal(me.headers['set-cookie'], undefined)
 
@@ -1788,5 +1788,46 @@ test('installable apps: manifest, service worker and icons without sign-in on bo
   } finally {
     server.close()
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('printing: only PRINT_EMAILS may print, on the board and from the editor', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'kanban-'))
+  const g = await fakeGoogle()
+  const env = {
+    GOOGLE_CLIENT_ID: 'cid',
+    GOOGLE_CLIENT_SECRET: 'csecret',
+    ALLOWED_EMAILS: 'me@example.com,other@example.com',
+    PRINT_EMAILS: ' Me@Example.com ',
+    SESSION_SECRET: SECRET,
+    EVENTS_FILE: join(dir, 'events.jsonl')
+  }
+  const server = await start(env, { tokenUrl: `${g.url}/token` })
+  const port = await listen(server)
+  const signIn = async (email, host) => {
+    const res = await request(port, '/auth/login', { host })
+    const l = { params: new URL(res.headers.location).searchParams, oauth: cookieOf(res, 'oauth') }
+    g.claims = { iss: 'accounts.google.com', aud: 'cid', exp: Math.floor(Date.now() / 1000) + 300, nonce: l.params.get('nonce'), email, email_verified: true }
+    g.grant = { scope: 'openid email' }
+    const back = await request(port, `/auth/callback?code=c&state=${l.params.get('state')}`, { host, headers: { cookie: l.oauth } })
+    assert.equal(back.status, 302)
+    return { ...H, host, cookie: cookieOf(back, 'sid') }
+  }
+  try {
+    const me = await signIn('me@example.com', 'kanban.localhost')
+    const other = await signIn('other@example.com', 'kanban.localhost')
+    const otherEditor = await signIn('other@example.com', 'printer-editor.localhost')
+    assert.equal((await request(port, '/api/me', { headers: me })).json.canPrint, true)
+    assert.equal((await request(port, '/api/me', { headers: other })).json.canPrint, false)
+    const task = (await request(port, '/api/tasks', { method: 'POST', headers: other, body: { title: 'Shared' } })).json
+    const refused = await request(port, `/api/tasks/${task.id}/print`, { method: 'POST', headers: other })
+    assert.equal(refused.status, 403)
+    assert.match(refused.json.error, /cannot print/)
+    const editor = await request(port, '/api/editor/print', { method: 'POST', headers: otherEditor, body: { payload: 'AA==' } })
+    assert.equal(editor.status, 403)
+    assert.equal((await request(port, `/api/tasks/${task.id}/print`, { method: 'POST', headers: me })).status, 202)
+  } finally {
+    server.close()
+    await g.close?.()
   }
 })
